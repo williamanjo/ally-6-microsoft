@@ -2,8 +2,12 @@
   "name": "ally-6-microsoft",
   "description": "Starter kit to create an Ally driver for an OAuth2 service",
   "version": "0.0.0",
-  "main": "index.js",
   "type": "module",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": "./build/index.js"
+  },
   "files": [
     "build/index.js",
     "build/index.d.ts",
@@ -27,8 +31,8 @@
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
-    "@adonisjs/ally": "^5.0.0-7",
-    "@adonisjs/core": "^6.1.5-32"
+    "@adonisjs/ally": "^6.0.0",
+    "@adonisjs/core": "^7.0.1"
   },
   "author": "",
   "license": "MIT",
