@@ -1,7 +1,7 @@
 {
   "name": "ally-6-microsoft",
   "description": "Starter kit to create an Ally driver for an OAuth2 service",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "main": "./build/index.js",
   "types": "./build/index.d.ts",
@@ -34,7 +34,7 @@
     "@adonisjs/ally": "^6.0.0",
     "@adonisjs/core": "^7.0.1"
   },
-  "author": "",
+  "author": "williamanjo",
   "license": "MIT",
   "keywords": [
     "social-auth",
