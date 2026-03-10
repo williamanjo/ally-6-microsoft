@@ -1,7 +1,7 @@
 {
   "name": "@williamanjo/ally-6-microsoft",
-  "description": "Microsoft OAuth2 (Azure AD / Entra ID) authentication driver for AdonisJS Ally v6",
-  "version": "1.0.1",
+  "description": "Microsoft OAuth2 (Azure AD / Entra ID) authentication driver for AdonisJS v7 and Ally v6",
+  "version": "1.0.2",
   "type": "module",
   "main": "./build/index.js",
   "types": "./build/index.d.ts",
