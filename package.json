@@ -9,9 +9,7 @@
     ".": "./build/index.js"
   },
   "files": [
-    "build/index.js",
-    "build/index.d.ts",
-    "build/src"
+    "build"
   ],
   "scripts": {
     "lint": "eslint . --ext=.ts",
