@@ -1,7 +1,7 @@
 {
   "name": "ally-6-microsoft",
-  "description": "Starter kit to create an Ally driver for an OAuth2 service",
-  "version": "1.0.0",
+  "description": "Microsoft OAuth2 (Azure AD / Entra ID) authentication driver for AdonisJS Ally v6",
+  "version": "1.0.1",
   "type": "module",
   "main": "./build/index.js",
   "types": "./build/index.d.ts",
