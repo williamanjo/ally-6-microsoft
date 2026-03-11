@@ -1,7 +1,7 @@
 {
   "name": "@williamanjo/ally-6-microsoft",
   "description": "Microsoft OAuth2 (Azure AD / Entra ID) authentication driver for AdonisJS v7 and Ally v6",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "main": "./build/index.js",
   "types": "./build/index.d.ts",
@@ -35,10 +35,25 @@
   "author": "williamanjo",
   "license": "MIT",
   "keywords": [
-    "social-auth",
-    "adonisjs-ally",
-    "adonisjs"
+    "adonisjs",
+    "ally",
+    "oauth2",
+    "microsoft",
+    "azure-ad",
+    "entra-id",
+    "social-login",
+    "authentication",
+    "oauth",
+    "adonisjs-ally"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/williamanjo/ally-6-microsoft.git"
+  },
+  "homepage": "https://github.com/williamanjo/ally-6-microsoft#readme",
+  "bugs": {
+    "url": "https://github.com/williamanjo/ally-6-microsoft/issues"
+  },
   "eslintConfig": {
     "extends": "@adonisjs/eslint-config/package"
   },

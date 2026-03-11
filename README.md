@@ -1,5 +1,9 @@
 # Ally Microsoft Driver for AdonisJS 7
 
+[![npm version](https://img.shields.io/npm/v/@williamanjo/ally-6-microsoft.svg)](https://www.npmjs.com/package/@williamanjo/ally-6-microsoft)
+[![npm downloads](https://img.shields.io/npm/dm/@williamanjo/ally-6-microsoft.svg)](https://www.npmjs.com/package/@williamanjo/ally-6-microsoft)
+[![license](https://img.shields.io/npm/l/@williamanjo/ally-6-microsoft.svg)](./LICENSE)
+
 Microsoft OAuth2 driver for AdonisJS 7 and Ally v6.
 This package allows authentication using Microsoft / Azure AD / Entra ID accounts.
 
@@ -132,6 +136,14 @@ Copy the following values:
 - Node.js 18+
 - AdonisJS 7+
 - @adonisjs/ally v6
+
+## Support
+
+For bugs and feature requests, open an issue on GitHub.
+
+## Contributing
+
+Contributions are welcome. Feel free to open issues and pull requests.
 
 ## License
 
