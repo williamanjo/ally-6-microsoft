@@ -12,6 +12,12 @@ export interface MicrosoftDriverContract
 export type MicrosoftDriverConfig = Oauth2DriverConfig & {
   scopes?: LiteralStringUnion<MicrosoftScopes>[]
   tenantId?: string
+  /**
+   * Whether to fetch the user's profile photo and return it as a
+   * base64 data URI in the `avatarUrl` field.
+   * Defaults to false. Set to true to enable photo fetching.
+   */
+  fetchPhoto?: boolean
 }
 
 export type MicrosoftToken = {
@@ -23,4 +29,10 @@ export type MicrosoftToken = {
   type: 'bearer'
 }
 
-export type MicrosoftScopes = 'openid'
+export type MicrosoftScopes =
+  | 'openid'
+  | 'profile'
+  | 'email'
+  | 'User.Read'
+  | 'User.ReadBasic.All'
+  | 'offline_access'

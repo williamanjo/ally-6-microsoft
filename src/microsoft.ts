@@ -8,17 +8,13 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   protected accessTokenUrl: string
 
   protected userInfoUrl = 'https://graph.microsoft.com/v1.0/me'
+  protected userPhotoUrl = 'https://graph.microsoft.com/v1.0/me/photo/$value'
 
   protected codeParamName = 'code'
-
   protected errorParamName = 'error'
-
   protected stateCookieName = 'microsoft_oauth_state'
-
   protected stateParamName = 'state'
-
   protected scopeParamName = 'scope'
-
   protected scopesSeparator = ' '
 
   constructor(
@@ -36,7 +32,7 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   }
 
   protected configureRedirectRequest(request: RedirectRequestContract<MicrosoftScopes>) {
-    request.scopes(this.config.scopes || ['openid'])
+    request.scopes(this.config.scopes || ['openid', 'profile', 'email', 'User.Read'])
     request.param('response_type', 'code')
   }
 
@@ -58,9 +54,9 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     if (!error) {
       return false
     }
-
     return error === 'access_denied'
   }
+
 
   /**
    * Returns details for the authorized user
@@ -79,7 +75,6 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
    */
   async userFromToken(token: string, callback?: (request: ApiRequestContract) => void) {
     const user = await this.getUserInfo(token, callback)
-
     return {
       ...user,
       token: { token: token, type: 'bearer' as const },
@@ -87,7 +82,39 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   }
 
   /**
-   * Fetches the user info from the Twitch API
+   * Fetches the user photo from Microsoft Graph API and returns as a
+   * base64 data URI (e.g. "data:image/jpeg;base64,...").
+   * Returns null if the user has no photo or if the request fails.
+   */
+  protected async getUserPhotoAsBase64(accessToken: string): Promise<string | null> {
+    try {
+      const response = await fetch(this.userPhotoUrl, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      })
+
+      if (!response.ok) {
+        return null
+      }
+
+      const contentType = response.headers.get('content-type') ?? 'image/jpeg'
+      const buffer = await response.arrayBuffer()
+      const base64 = Buffer.from(buffer).toString('base64')
+
+      return `data:${contentType};base64,${base64}`
+    } catch {
+      return null
+    }
+  }
+
+
+  /**
+   * Fetches the user info from the Microsoft Graph API and maps
+   * fields to the Ally standard user format.
+   *
+   * avatarUrl will be a base64 data URI when the user has a photo,
+   * or null when they don't (or when fetchPhoto is set to false in config).
    */
   protected async getUserInfo(accessToken: string, callback?: (request: ApiRequest) => void) {
     const request = this.getAuthenticatedRequest(this.userInfoUrl, accessToken)
@@ -96,7 +123,20 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
       callback(request)
     }
 
-    return await request.get()
+    const body = await request.get()
+
+    const avatarUrl =
+      this.config.fetchPhoto === true ? await this.getUserPhotoAsBase64(accessToken) : null
+
+    return {
+      id: body.id as string,
+      nickName: (body.displayName ?? body.userPrincipalName) as string,
+      name: (body.displayName ?? body.userPrincipalName) as string,
+      email: (body.mail ?? body.userPrincipalName) as string,
+      avatarUrl,
+      emailVerificationState: 'unsupported' as const,
+      original: body,
+    }
   }
 
   /**
