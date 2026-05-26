@@ -182,6 +182,16 @@ openssl req -new -x509 -key private.key -out certificate.crt -days 365 \
   -subj "/CN=my-app-name"
 ```
 
+**Windows (Git Bash):** Git Bash converts `/CN=...` as a Unix path — prefix with `MSYS_NO_PATHCONV=1`:
+```bash
+MSYS_NO_PATHCONV=1 openssl req -new -x509 -key private.key -out certificate.crt -days 365 -subj "/CN=my-app-name"
+```
+
+**Windows (PowerShell):** use `//CN=` instead:
+```powershell
+openssl req -new -x509 -key private.key -out certificate.crt -days 365 -subj "//CN=my-app-name"
+```
+
 > You only need `private.key` (stays on your server) and `certificate.crt` (uploaded to Azure).
 
 ---
