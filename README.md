@@ -166,6 +166,111 @@ microsoft: microsoft({
 | `User.ReadBasic.All` | Read basic profiles of all users |
 | `offline_access` | Receive a refresh token |
 
+## Certificate authentication
+
+Instead of a client secret, you can authenticate using a certificate (recommended for production).
+`clientSecret` is not required when `certificate` is provided.
+
+### 1. Generate the private key and self-signed certificate
+
+```bash
+# Generate RSA private key (2048-bit, no passphrase)
+openssl genrsa -out private.key 2048
+
+# Generate self-signed certificate valid for 1 year
+openssl req -new -x509 -key private.key -out certificate.crt -days 365 \
+  -subj "/CN=my-app-name"
+```
+
+> You only need `private.key` (stays on your server) and `certificate.crt` (uploaded to Azure).
+
+---
+
+### 2. Extract the thumbprint locally
+
+The thumbprint is the SHA-1 fingerprint of the certificate. Extract it before uploading so you can verify it matches Azure.
+
+```bash
+openssl x509 -in certificate.crt -fingerprint -sha1 -noout
+```
+
+Output example:
+```
+SHA1 Fingerprint=A1:B2:C3:D4:E5:F6:A1:B2:C3:D4:E5:F6:A1:B2:C3:D4:E5:F6:A1:B2
+```
+
+The driver accepts both formats — with or without colons:
+- `A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2` ✅
+- `A1:B2:C3:D4:E5:F6:A1:B2:C3:D4:E5:F6:A1:B2:C3:D4:E5:F6:A1:B2` ✅
+
+---
+
+### 3. Upload the certificate to Azure Portal
+
+1. Go to **Azure Portal** → **App Registrations** → your app
+2. Open **Certificates & secrets** → **Certificates** tab
+3. Click **Upload certificate** and select `certificate.crt`
+4. Copy the **Thumbprint** shown after upload — confirm it matches the one extracted in step 2
+
+---
+
+### 4. Format the private key for `.env`
+
+The private key is multiline. To store it in `.env`, replace newlines with `\n`:
+
+**Linux / macOS:**
+```bash
+awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' private.key
+```
+
+**Windows (PowerShell):**
+```powershell
+(Get-Content private.key) -join '\n'
+```
+
+Copy the output (single line starting with `-----BEGIN RSA PRIVATE KEY-----`) into your `.env`.
+
+---
+
+### 5. Configure environment variables
+
+```env
+MICROSOFT_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+MICROSOFT_CALLBACK_URL="http://localhost:3333/microsoft/callback"
+MICROSOFT_TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+MICROSOFT_CERT_THUMBPRINT=A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2
+MICROSOFT_CERT_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----"
+```
+
+---
+
+### 6. Register the driver with certificate
+
+```ts
+import { defineConfig } from '@adonisjs/ally'
+import env from '#start/env'
+import { microsoft } from '@williamanjo/ally-6-microsoft'
+
+const allyConfig = defineConfig({
+  microsoft: microsoft({
+    clientId: env.get('MICROSOFT_CLIENT_ID'),
+    callbackUrl: env.get('MICROSOFT_CALLBACK_URL'),
+    tenantId: env.get('MICROSOFT_TENANT_ID'),
+    certificate: {
+      privateKey: env.get('MICROSOFT_CERT_PRIVATE_KEY'),
+      thumbprint: env.get('MICROSOFT_CERT_THUMBPRINT'),
+    },
+  })
+})
+
+export default allyConfig
+```
+
+> **Note:** `clientSecret` is **required** unless `certificate` is provided. Passing neither throws an error at startup:
+> `MicrosoftDriver: "clientSecret" is required when not using certificate authentication.`
+>
+> When using certificate auth, omit `clientSecret` entirely — it is not needed.
+
 ## Azure configuration
 
 Create an application in Azure Portal.
@@ -178,7 +283,7 @@ Create an application in Azure Portal.
 Copy the following values:
 
 - Application (client) ID
-- Client secret
+- Client secret **or** certificate thumbprint
 - Tenant ID
 
 ## Supported features
@@ -186,6 +291,8 @@ Copy the following values:
 - OAuth2 Authorization Code flow
 - Microsoft Account login
 - Azure AD / Entra ID login
+- **Client secret authentication**
+- **Certificate authentication** (JWT client_assertion via RS256)
 - Profile photo as base64 data URI (opt-in via `fetchPhoto: true`)
 - Correct field mapping (`id`, `name`, `email`, `avatarUrl`, `original`)
 - Multi-tenant support via `tenantId`

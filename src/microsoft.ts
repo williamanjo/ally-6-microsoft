@@ -1,6 +1,8 @@
+import { createSign } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { ApiRequest, Oauth2Driver } from '@adonisjs/ally'
 import type { HttpContext } from '@adonisjs/core/http'
-import { MicrosoftDriverConfig, MicrosoftScopes, MicrosoftToken } from './types/main.js'
+import { MicrosoftDriverConfig, MicrosoftDriverConfigResolved, MicrosoftScopes, MicrosoftToken } from './types/main.js'
 import type { ApiRequestContract, RedirectRequestContract } from '@adonisjs/ally/types'
 
 export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScopes> {
@@ -17,11 +19,21 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   protected scopeParamName = 'scope'
   protected scopesSeparator = ' '
 
-  constructor(
-    ctx: HttpContext,
-    public config: MicrosoftDriverConfig
-  ) {
-    super(ctx, config)
+  public config: MicrosoftDriverConfigResolved
+
+  constructor(ctx: HttpContext, inputConfig: MicrosoftDriverConfig) {
+    const config: MicrosoftDriverConfigResolved = {
+      clientSecret: '',
+      ...inputConfig,
+    }
+    if (!config.certificate && !config.clientSecret) {
+      throw new Error(
+        'MicrosoftDriver: "clientSecret" is required when not using certificate authentication.'
+      )
+    }
+
+    super(ctx, config as any)
+    this.config = config
 
     const tenantId = this.config.tenantId || 'common'
 
@@ -36,14 +48,62 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     request.param('response_type', 'code')
   }
 
+  /**
+   * Builds a signed JWT client_assertion for certificate-based authentication.
+   *
+   * Microsoft requires:
+   *  - Header: { alg: 'RS256', typ: 'JWT', x5t: '<sha1-thumbprint-base64url>' }
+   *  - Payload: aud, iss, sub (= clientId), jti, nbf, exp
+   *  - Signed with the private key using RS256
+   *
+   * See: https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials
+   */
+  protected buildClientAssertion(): string {
+    const { privateKey, thumbprint } = this.config.certificate!
+    const tenantId = this.config.tenantId || 'common'
+
+    // Normalize thumbprint: strip colons, decode hex → base64url
+    const x5t = Buffer.from(thumbprint.replace(/:/g, ''), 'hex').toString('base64url')
+
+    const now = Math.floor(Date.now() / 1000)
+
+    const header = { alg: 'RS256', typ: 'JWT', x5t }
+    const payload = {
+      aud: `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      iss: this.config.clientId,
+      sub: this.config.clientId,
+      jti: randomUUID(),
+      nbf: now,
+      exp: now + 600,
+    }
+
+    const encode = (obj: object) => Buffer.from(JSON.stringify(obj)).toString('base64url')
+    const signingInput = `${encode(header)}.${encode(payload)}`
+
+    const sign = createSign('RSA-SHA256')
+    sign.update(signingInput)
+    const signature = sign.sign(privateKey, 'base64url')
+
+    return `${signingInput}.${signature}`
+  }
+
   protected configureAccessTokenRequest(request: ApiRequest): void {
     request
       .header('Content-Type', 'application/x-www-form-urlencoded')
       .field('grant_type', 'authorization_code')
       .field('client_id', this.config.clientId)
-      .field('client_secret', this.config.clientSecret)
       .field('redirect_uri', this.config.callbackUrl)
       .field('code', this.ctx.request.input(this.codeParamName))
+
+    if (this.config.certificate) {
+      // Certificate auth: signed JWT assertion replaces clientSecret
+      request
+        .field('client_assertion_type', 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer')
+        .field('client_assertion', this.buildClientAssertion())
+    } else {
+      // Secret auth: plain clientSecret
+      request.field('client_secret', this.config.clientSecret)
+    }
   }
 
   /**
@@ -56,7 +116,6 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     }
     return error === 'access_denied'
   }
-
 
   /**
    * Returns details for the authorized user
@@ -107,7 +166,6 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
       return null
     }
   }
-
 
   /**
    * Fetches the user info from the Microsoft Graph API and maps

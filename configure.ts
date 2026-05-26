@@ -8,23 +8,33 @@ export async function configure(command: Configure) {
 
   /**
    * 1. Add env variables to .env and .env.example
+   *
+   * MICROSOFT_CLIENT_SECRET  → client secret auth
+   * MICROSOFT_CERT_*         → certificate auth (alternative to client secret)
    */
   await codemods.defineEnvVariables({
     MICROSOFT_CLIENT_ID: '',
     MICROSOFT_CLIENT_SECRET: '',
     MICROSOFT_CALLBACK_URL: '',
     MICROSOFT_TENANT_ID: '',
+    MICROSOFT_CERT_THUMBPRINT: '',
+    MICROSOFT_CERT_PRIVATE_KEY: '',
   })
 
   /**
    * 2. Add env validations to start/env.ts
+   *
+   * clientSecret and certificate vars are both optional because
+   * only one auth method is required at a time.
    */
   await codemods.defineEnvValidations({
     variables: {
       MICROSOFT_CLIENT_ID: 'Env.schema.string()',
-      MICROSOFT_CLIENT_SECRET: 'Env.schema.string()',
+      MICROSOFT_CLIENT_SECRET: 'Env.schema.string.optional()',
       MICROSOFT_CALLBACK_URL: 'Env.schema.string()',
       MICROSOFT_TENANT_ID: 'Env.schema.string.optional()',
+      MICROSOFT_CERT_THUMBPRINT: 'Env.schema.string.optional()',
+      MICROSOFT_CERT_PRIVATE_KEY: 'Env.schema.string.optional()',
     },
     leadingComment: 'Variables for @williamanjo/ally-6-microsoft',
   })

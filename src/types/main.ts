@@ -9,7 +9,30 @@ export interface MicrosoftDriverContract
   version: 'oauth2'
 }
 
-export type MicrosoftDriverConfig = Oauth2DriverConfig & {
+export type CertificateConfig = {
+  /**
+   * Private key in PEM format (content of the .key / .pem file)
+   */
+  privateKey: string
+  /**
+   * SHA-1 thumbprint from Azure Portal > App Registration > Certificates & secrets
+   * Accepts plain hex (e.g. "A1B2C3...") or colon-separated (e.g. "A1:B2:C3...")
+   */
+  thumbprint: string
+}
+
+export type MicrosoftDriverConfig = Omit<Oauth2DriverConfig, 'clientSecret'> & {
+  /**
+   * Required when NOT using certificate authentication.
+   * When using certificate auth, omit this field or pass an empty string.
+   */
+  clientSecret?: string
+  /**
+   * Certificate-based authentication (replaces clientSecret).
+   * When provided, a signed JWT client_assertion is sent instead of clientSecret.
+   * See: https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials
+   */
+  certificate?: CertificateConfig
   scopes?: LiteralStringUnion<MicrosoftScopes>[]
   tenantId?: string
   /**
@@ -18,6 +41,15 @@ export type MicrosoftDriverConfig = Oauth2DriverConfig & {
    * Defaults to false. Set to true to enable photo fetching.
    */
   fetchPhoto?: boolean
+}
+
+/**
+ * Internal resolved config — clientSecret is always a string (defaults to '')
+ * so the base Oauth2Driver constraint is satisfied.
+ * @internal
+ */
+export type MicrosoftDriverConfigResolved = Omit<MicrosoftDriverConfig, 'clientSecret'> & {
+  clientSecret: string
 }
 
 export type MicrosoftToken = {
