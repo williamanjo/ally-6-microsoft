@@ -1,4 +1,4 @@
-import { createSign } from 'node:crypto'
+import { createSign, createPrivateKey } from 'node:crypto'
 import { randomUUID } from 'node:crypto'
 import { ApiRequest, Oauth2Driver } from '@adonisjs/ally'
 import type { HttpContext } from '@adonisjs/core/http'
@@ -80,9 +80,10 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     const encode = (obj: object) => Buffer.from(JSON.stringify(obj)).toString('base64url')
     const signingInput = `${encode(header)}.${encode(payload)}`
 
+    const keyObject = createPrivateKey({ key: privateKey, format: 'pem' })
     const sign = createSign('RSA-SHA256')
     sign.update(signingInput)
-    const signature = sign.sign(privateKey, 'base64url')
+    const signature = sign.sign(keyObject, 'base64url')
 
     return `${signingInput}.${signature}`
   }
