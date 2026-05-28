@@ -1,5 +1,6 @@
 import { createSign, createPrivateKey } from 'node:crypto'
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { ApiRequest, Oauth2Driver } from '@adonisjs/ally'
 import type { HttpContext } from '@adonisjs/core/http'
 import { MicrosoftDriverConfig, MicrosoftDriverConfigResolved, MicrosoftScopes, MicrosoftToken } from './types/main.js'
@@ -80,11 +81,15 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     const encode = (obj: object) => Buffer.from(JSON.stringify(obj)).toString('base64url')
     const signingInput = `${encode(header)}.${encode(payload)}`
 
-    const normalizedKey = privateKey
-      .replace(/^['"]|['"]$/g, '') // strip surrounding quotes (dotenv artefact)
-      .replace(/\\n/g, '\n')       // literal \n → real newline
-      .trim()
-    const keyObject = createPrivateKey({ key: normalizedKey, format: 'pem' })
+    let keyBuffer: Buffer
+    try {
+      keyBuffer = readFileSync(privateKey)
+    } catch {
+      throw new Error(
+        `MicrosoftDriver: certificate private key file not found: "${privateKey}"`
+      )
+    }
+    const keyObject = createPrivateKey({ key: keyBuffer, format: 'pem' })
     const sign = createSign('RSA-SHA256')
     sign.update(signingInput)
     const signature = sign.sign(keyObject, 'base64url')

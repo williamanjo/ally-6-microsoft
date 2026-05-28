@@ -18,7 +18,7 @@ export async function configure(command: Configure) {
     MICROSOFT_CALLBACK_URL: '',
     MICROSOFT_TENANT_ID: '',
     MICROSOFT_CERT_THUMBPRINT: '',
-    MICROSOFT_CERT_PRIVATE_KEY: '',
+    MICROSOFT_CERT_PRIVATE_KEY: '/etc/certs/private.key',
   })
 
   /**

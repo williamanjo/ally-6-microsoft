@@ -224,37 +224,23 @@ The driver accepts both formats — with or without colons:
 
 ---
 
-### 4. Format the private key for `.env`
+### 4. Configure environment variables
 
-The private key is multiline. To store it in `.env`, replace newlines with `\n`:
-
-**Linux / macOS:**
-```bash
-awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' private.key
-```
-
-**Windows (PowerShell):**
-```powershell
-(Get-Content private.key) -join '\n'
-```
-
-Copy the output (single line starting with `-----BEGIN RSA PRIVATE KEY-----`) into your `.env`.
-
----
-
-### 5. Configure environment variables
+Set `MICROSOFT_CERT_PRIVATE_KEY` to the **absolute path** of the private key file on the server.
 
 ```env
 MICROSOFT_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 MICROSOFT_CALLBACK_URL="http://localhost:3333/microsoft/callback"
 MICROSOFT_TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 MICROSOFT_CERT_THUMBPRINT=A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2
-MICROSOFT_CERT_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----"
+MICROSOFT_CERT_PRIVATE_KEY=/etc/certs/private.key
 ```
+
+> The driver reads the file at runtime — never put the key content directly in `.env`.
 
 ---
 
-### 6. Register the driver with certificate
+### 5. Register the driver with certificate
 
 ```ts
 import { defineConfig } from '@adonisjs/ally'

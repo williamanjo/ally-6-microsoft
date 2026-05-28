@@ -11,7 +11,8 @@ export interface MicrosoftDriverContract
 
 export type CertificateConfig = {
   /**
-   * Private key in PEM format (content of the .key / .pem file)
+   * Absolute path to the private key file (.key / .pem)
+   * e.g. "/etc/certs/private.key" or "C:/certs/private.key"
    */
   privateKey: string
   /**

@@ -22,7 +22,7 @@ const allyConfig = defineConfig({
    *   callbackUrl: env.get('MICROSOFT_CALLBACK_URL'),
    *   tenantId: env.get('MICROSOFT_TENANT_ID'),
    *   certificate: {
-   *     privateKey: env.get('MICROSOFT_CERT_PRIVATE_KEY'),
+   *     privateKey: env.get('MICROSOFT_CERT_PRIVATE_KEY'), // absolute path to .key file
    *     thumbprint: env.get('MICROSOFT_CERT_THUMBPRINT'),
    *   },
    * }),
