@@ -80,7 +80,11 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     const encode = (obj: object) => Buffer.from(JSON.stringify(obj)).toString('base64url')
     const signingInput = `${encode(header)}.${encode(payload)}`
 
-    const keyObject = createPrivateKey({ key: privateKey, format: 'pem' })
+    const normalizedKey = privateKey
+      .replace(/^['"]|['"]$/g, '') // strip surrounding quotes (dotenv artefact)
+      .replace(/\\n/g, '\n')       // literal \n → real newline
+      .trim()
+    const keyObject = createPrivateKey({ key: normalizedKey, format: 'pem' })
     const sign = createSign('RSA-SHA256')
     sign.update(signingInput)
     const signature = sign.sign(keyObject, 'base64url')
