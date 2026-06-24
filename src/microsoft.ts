@@ -1,10 +1,16 @@
-import { createSign, createPrivateKey } from 'node:crypto'
-import { randomUUID } from 'node:crypto'
+import { createSign, createPrivateKey, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { ApiRequest, Oauth2Driver } from '@adonisjs/ally'
+import { type ApiRequest, Oauth2Driver } from '@adonisjs/ally'
 import type { HttpContext } from '@adonisjs/core/http'
-import { MicrosoftDriverConfig, MicrosoftDriverConfigResolved, MicrosoftScopes, MicrosoftToken } from './types/main.js'
+import {
+  type MicrosoftDriverConfig,
+  type MicrosoftDriverConfigResolved,
+  type MicrosoftScopes,
+  type MicrosoftToken,
+} from './types/main.js'
 import type { ApiRequestContract, RedirectRequestContract } from '@adonisjs/ally/types'
+
+const ALLOWED_PHOTO_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 
 export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScopes> {
   protected authorizeUrl: string
@@ -85,9 +91,7 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     try {
       keyBuffer = readFileSync(privateKey)
     } catch {
-      throw new Error(
-        `MicrosoftDriver: certificate private key file not found: "${privateKey}"`
-      )
+      throw new Error(`MicrosoftDriver: certificate private key file not found: "${privateKey}"`)
     }
     const keyObject = createPrivateKey({ key: keyBuffer, format: 'pem' })
     const sign = createSign('RSA-SHA256')
@@ -167,7 +171,10 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
         return null
       }
 
-      const contentType = response.headers.get('content-type') ?? 'image/jpeg'
+      const rawContentType = response.headers.get('content-type') ?? 'image/jpeg'
+      const contentType = rawContentType.split(';')[0].trim().toLowerCase()
+      if (!ALLOWED_PHOTO_CONTENT_TYPES.includes(contentType)) return null
+
       const buffer = await response.arrayBuffer()
       const base64 = Buffer.from(buffer).toString('base64')
 

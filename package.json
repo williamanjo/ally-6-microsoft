@@ -1,7 +1,7 @@
 {
   "name": "@williamanjo/ally-6-microsoft",
   "description": "Microsoft OAuth2 (Azure AD / Entra ID) authentication driver for AdonisJS v7 and Ally v6",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "type": "module",
   "main": "./build/index.js",
   "types": "./build/index.d.ts",
@@ -9,10 +9,11 @@
     ".": "./build/index.js"
   },
   "files": [
-    "build"
+    "build",
+    "stubs"
   ],
   "scripts": {
-    "lint": "eslint . --ext=.ts",
+    "lint": "eslint .",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "pretest": "npm run lint",
@@ -37,14 +38,20 @@
   "keywords": [
     "adonisjs",
     "ally",
+    "adonisjs-ally",
     "oauth2",
+    "oauth",
     "microsoft",
+    "azure",
     "azure-ad",
     "entra-id",
+    "microsoft-identity",
     "social-login",
     "authentication",
-    "oauth",
-    "adonisjs-ally"
+    "certificate-auth",
+    "client-assertion",
+    "rs256",
+    "jwt"
   ],
   "repository": {
     "type": "git",
@@ -53,9 +60,6 @@
   "homepage": "https://github.com/williamanjo/ally-6-microsoft#readme",
   "bugs": {
     "url": "https://github.com/williamanjo/ally-6-microsoft/issues"
-  },
-  "eslintConfig": {
-    "extends": "@adonisjs/eslint-config/package"
   },
   "prettier": "@adonisjs/prettier-config"
 }

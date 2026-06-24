@@ -57,7 +57,7 @@ export async function configure(command: Configure) {
     command.logger.warning(
       [
         'config/ally.ts already exists.',
-        "Add the microsoft driver manually following the README instructions.",
+        'Add the microsoft driver manually following the README instructions.',
       ].join(' ')
     )
   }
