@@ -3,30 +3,26 @@ import env from '#start/env'
 import { microsoft } from '@williamanjo/ally-6-microsoft'
 
 const allyConfig = defineConfig({
-  /**
-   * Option 1: Client secret authentication
-   */
+  @if(useCert)
+  microsoft: microsoft({
+    clientId: env.get('MICROSOFT_CLIENT_ID'),
+    callbackUrl: env.get('MICROSOFT_CALLBACK_URL'),
+    tenantId: env.get('MICROSOFT_TENANT_ID'),
+    {{{ scopesLine }}}
+    certificate: {
+      privateKey: env.get('MICROSOFT_CERT_PRIVATE_KEY'),
+      thumbprint: env.get('MICROSOFT_CERT_THUMBPRINT'),
+    },
+  }),
+  @else
   microsoft: microsoft({
     clientId: env.get('MICROSOFT_CLIENT_ID'),
     clientSecret: env.get('MICROSOFT_CLIENT_SECRET'),
     callbackUrl: env.get('MICROSOFT_CALLBACK_URL'),
     tenantId: env.get('MICROSOFT_TENANT_ID'),
+    {{{ scopesLine }}}
   }),
-
-  /**
-   * Option 2: Certificate authentication (recommended for production)
-   * Remove clientSecret and use certificate instead.
-   *
-   * microsoft: microsoft({
-   *   clientId: env.get('MICROSOFT_CLIENT_ID'),
-   *   callbackUrl: env.get('MICROSOFT_CALLBACK_URL'),
-   *   tenantId: env.get('MICROSOFT_TENANT_ID'),
-   *   certificate: {
-   *     privateKey: env.get('MICROSOFT_CERT_PRIVATE_KEY'), // absolute path to .key file
-   *     thumbprint: env.get('MICROSOFT_CERT_THUMBPRINT'),
-   *   },
-   * }),
-   */
+  @end
 })
 
 export default allyConfig

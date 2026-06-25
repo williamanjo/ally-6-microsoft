@@ -22,11 +22,21 @@ npm install @williamanjo/ally-6-microsoft
 node ace configure @williamanjo/ally-6-microsoft
 ```
 
+The command is interactive — it will ask:
+
+1. **Authentication method** — `Client Secret` or `Certificate (RS256 JWT)`
+2. **Scopes** — multi-select with defaults pre-checked (`openid`, `profile`, `email`, `User.Read`)
+
+Based on your choices it will:
+- Add only the relevant env vars to `.env` and `.env.example`
+- Add env validations to `start/env.ts`
+- Create `config/ally.ts` with the correct driver block — or, if the file already exists, print the block to add manually
+
 ## Authentication methods
 
 ### Option A — Client secret (quick start)
 
-Set these env vars:
+Env vars added by `configure`:
 
 ```env
 MICROSOFT_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
@@ -35,7 +45,7 @@ MICROSOFT_CALLBACK_URL=http://localhost:3333/microsoft/callback
 MICROSOFT_TENANT_ID=common
 ```
 
-Register in `config/ally.ts`:
+Generated `config/ally.ts`:
 
 ```ts
 import { defineConfig } from '@adonisjs/ally'
@@ -99,6 +109,8 @@ The driver accepts both formats — with or without colons.
 
 #### 4. Set env vars
 
+Env vars added by `configure` when you choose certificate auth:
+
 ```env
 MICROSOFT_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 MICROSOFT_CALLBACK_URL=http://localhost:3333/microsoft/callback
@@ -110,6 +122,8 @@ MICROSOFT_CERT_PRIVATE_KEY=/etc/certs/private.key
 > `MICROSOFT_CERT_PRIVATE_KEY` must be the **absolute path** to the key file on the server. Never put the key content directly in `.env`.
 
 #### 5. Register the driver
+
+Generated `config/ally.ts`:
 
 ```ts
 import { defineConfig } from '@adonisjs/ally'
