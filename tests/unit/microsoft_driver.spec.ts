@@ -51,7 +51,7 @@ const CERT_CONFIG: MicrosoftDriverConfig = {
 }
 
 // ---------------------------------------------------------------------------
-// TestDriver — exposes protected methods for direct testing
+// TestDriver — exposes protected methods, generic get/post body
 // ---------------------------------------------------------------------------
 class TestDriver extends MicrosoftDriver {
   private _mockBody: Record<string, unknown> = {}
@@ -82,6 +82,75 @@ class TestDriver extends MicrosoftDriver {
 
   async testGetUserPhoto(token: string) {
     return this.getUserPhotoAsBase64(token)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SpyDriver — records field() calls, supports separate get/post bodies
+// ---------------------------------------------------------------------------
+class SpyDriver extends MicrosoftDriver {
+  private _getBody: Record<string, unknown> = {}
+  private _postBody: Record<string, unknown> = {}
+  readonly fields: Map<string, string> = new Map()
+
+  setGetBody(body: Record<string, unknown>) {
+    this._getBody = body
+  }
+  setPostBody(body: Record<string, unknown>) {
+    this._postBody = body
+  }
+
+  protected override httpClient(_url: string): any {
+    const self = this
+    const req: any = {
+      header: () => req,
+      parseAs: () => req,
+      field: (k: string, v: string) => {
+        self.fields.set(k, v)
+        return req
+      },
+      get: async () => self._getBody,
+      post: async () => self._postBody,
+    }
+    return req
+  }
+
+  testConfigureAccessTokenRequest() {
+    const self = this
+    const req: any = {
+      header: () => req,
+      field: (k: string, v: string) => {
+        self.fields.set(k, v)
+        return req
+      },
+    }
+    this.configureAccessTokenRequest(req)
+  }
+
+  testConfigureRedirectRequest(spy: any) {
+    this.configureRedirectRequest(spy)
+  }
+
+  async testRefreshAccessToken(token: string) {
+    return this.refreshAccessToken(token)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// RedirectSpy — records param() and scopes() calls
+// ---------------------------------------------------------------------------
+class RedirectSpy {
+  readonly params: Record<string, string> = {}
+  readonly scopesList: string[][] = []
+
+  scopes(s: string[]) {
+    this.scopesList.push(s)
+    return this
+  }
+
+  param(k: string, v: string) {
+    this.params[k] = v
+    return this
   }
 }
 
@@ -160,6 +229,152 @@ test.group('buildClientAssertion', () => {
     const header = JSON.parse(Buffer.from(jwt.split('.')[0], 'base64url').toString())
     const expected = Buffer.from(TEST_THUMBPRINT, 'hex').toString('base64url')
     assert.equal(header.x5t, expected)
+  })
+
+  test('throws with clear message when private key file does not exist', ({ assert }) => {
+    const driver = new TestDriver(createCtx(), {
+      ...CERT_CONFIG,
+      certificate: { privateKey: '/nonexistent/path/private.key', thumbprint: TEST_THUMBPRINT },
+    })
+    assert.throws(() => driver.testBuildClientAssertion(), /certificate private key file not found/)
+  })
+})
+
+test.group('configureAccessTokenRequest', () => {
+  test('secret flow sets client_secret and no client_assertion', ({ assert }) => {
+    const driver = new SpyDriver(createCtx({ code: 'auth-code' }), SECRET_CONFIG)
+    driver.testConfigureAccessTokenRequest()
+    assert.equal(driver.fields.get('client_secret'), 'test-secret')
+    assert.isFalse(driver.fields.has('client_assertion'))
+    assert.isFalse(driver.fields.has('client_assertion_type'))
+  })
+
+  test('cert flow sets client_assertion and no client_secret', ({ assert }) => {
+    const driver = new SpyDriver(createCtx({ code: 'auth-code' }), CERT_CONFIG)
+    driver.testConfigureAccessTokenRequest()
+    assert.isTrue(driver.fields.has('client_assertion'))
+    assert.equal(
+      driver.fields.get('client_assertion_type'),
+      'urn:ietf:params:oauth:client-assertion-type:jwt-bearer'
+    )
+    assert.isFalse(driver.fields.has('client_secret'))
+  })
+
+  test('both flows set grant_type authorization_code', ({ assert }) => {
+    const driver = new SpyDriver(createCtx({ code: 'auth-code' }), SECRET_CONFIG)
+    driver.testConfigureAccessTokenRequest()
+    assert.equal(driver.fields.get('grant_type'), 'authorization_code')
+  })
+})
+
+test.group('configureRedirectRequest', () => {
+  test('adds prompt param when configured', ({ assert }) => {
+    const driver = new SpyDriver(createCtx(), {
+      ...SECRET_CONFIG,
+      prompt: 'select_account',
+    })
+    const spy = new RedirectSpy()
+    driver.testConfigureRedirectRequest(spy)
+    assert.equal(spy.params['prompt'], 'select_account')
+  })
+
+  test('adds login_hint param when configured', ({ assert }) => {
+    const driver = new SpyDriver(createCtx(), {
+      ...SECRET_CONFIG,
+      loginHint: 'user@contoso.com',
+    })
+    const spy = new RedirectSpy()
+    driver.testConfigureRedirectRequest(spy)
+    assert.equal(spy.params['login_hint'], 'user@contoso.com')
+  })
+
+  test('adds domain_hint param when configured', ({ assert }) => {
+    const driver = new SpyDriver(createCtx(), {
+      ...SECRET_CONFIG,
+      domainHint: 'contoso.com',
+    })
+    const spy = new RedirectSpy()
+    driver.testConfigureRedirectRequest(spy)
+    assert.equal(spy.params['domain_hint'], 'contoso.com')
+  })
+
+  test('does not add optional params when not configured', ({ assert }) => {
+    const driver = new SpyDriver(createCtx(), SECRET_CONFIG)
+    const spy = new RedirectSpy()
+    driver.testConfigureRedirectRequest(spy)
+    assert.isFalse('prompt' in spy.params)
+    assert.isFalse('login_hint' in spy.params)
+    assert.isFalse('domain_hint' in spy.params)
+  })
+})
+
+test.group('refreshAccessToken', () => {
+  test('returns MicrosoftToken with correct shape', async ({ assert }) => {
+    const driver = new SpyDriver(createCtx(), SECRET_CONFIG)
+    driver.setPostBody({
+      access_token: 'new-access-token',
+      token_type: 'Bearer',
+      expires_in: 3600,
+      refresh_token: 'new-refresh-token',
+      scope: 'openid profile email',
+    })
+    const token = await driver.testRefreshAccessToken('old-refresh-token')
+    assert.equal(token.token, 'new-access-token')
+    assert.equal(token.type, 'bearer')
+    assert.equal(token.refreshToken, 'new-refresh-token')
+    assert.equal(token.expiresIn, 3600)
+    assert.instanceOf(token.expiresAt, Date)
+    assert.deepEqual(token.scope, ['openid', 'profile', 'email'])
+  })
+
+  test('falls back to input refresh token when MS does not return a new one', async ({
+    assert,
+  }) => {
+    const driver = new SpyDriver(createCtx(), SECRET_CONFIG)
+    driver.setPostBody({
+      access_token: 'new-token',
+      token_type: 'Bearer',
+      expires_in: 3600,
+      scope: 'openid',
+    })
+    const token = await driver.testRefreshAccessToken('original-refresh-token')
+    assert.equal(token.refreshToken, 'original-refresh-token')
+  })
+
+  test('secret flow sends client_secret in refresh request', async ({ assert }) => {
+    const driver = new SpyDriver(createCtx(), SECRET_CONFIG)
+    driver.setPostBody({ access_token: 'tok', token_type: 'Bearer', expires_in: 3600, scope: '' })
+    await driver.testRefreshAccessToken('rt')
+    assert.equal(driver.fields.get('grant_type'), 'refresh_token')
+    assert.equal(driver.fields.get('client_secret'), 'test-secret')
+    assert.isFalse(driver.fields.has('client_assertion'))
+  })
+
+  test('cert flow sends client_assertion in refresh request', async ({ assert }) => {
+    const driver = new SpyDriver(createCtx(), CERT_CONFIG)
+    driver.setPostBody({ access_token: 'tok', token_type: 'Bearer', expires_in: 3600, scope: '' })
+    await driver.testRefreshAccessToken('rt')
+    assert.equal(driver.fields.get('grant_type'), 'refresh_token')
+    assert.isTrue(driver.fields.has('client_assertion'))
+    assert.isFalse(driver.fields.has('client_secret'))
+  })
+
+  test('expiresAt is approximately now + expiresIn seconds', async ({ assert }) => {
+    const driver = new SpyDriver(createCtx(), SECRET_CONFIG)
+    const expiresIn = 7200
+    driver.setPostBody({
+      access_token: 'tok',
+      token_type: 'Bearer',
+      expires_in: expiresIn,
+      scope: '',
+    })
+    const before = Date.now()
+    const token = await driver.testRefreshAccessToken('rt')
+    const after = Date.now()
+    const expectedMin = before + expiresIn * 1000
+    const expectedMax = after + expiresIn * 1000
+    assert.isAtLeast(token.expiresAt.getTime(), expectedMin)
+    assert.isAtMost(token.expiresAt.getTime(), expectedMax)
   })
 })
 
