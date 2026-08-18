@@ -53,6 +53,9 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   protected configureRedirectRequest(request: RedirectRequestContract<MicrosoftScopes>) {
     request.scopes(this.config.scopes || ['openid', 'profile', 'email', 'User.Read'])
     request.param('response_type', 'code')
+    if (this.config.prompt) request.param('prompt', this.config.prompt)
+    if (this.config.loginHint) request.param('login_hint', this.config.loginHint)
+    if (this.config.domainHint) request.param('domain_hint', this.config.domainHint)
   }
 
   /**
@@ -117,6 +120,38 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     } else {
       // Secret auth: plain clientSecret
       request.field('client_secret', this.config.clientSecret)
+    }
+  }
+
+  /**
+   * Exchanges a refresh token for a new access token.
+   * Requires the `offline_access` scope to be included in the original authorization request.
+   */
+  async refreshAccessToken(refreshToken: string): Promise<MicrosoftToken> {
+    const request = this.httpClient(this.accessTokenUrl)
+    request
+      .header('Content-Type', 'application/x-www-form-urlencoded')
+      .field('grant_type', 'refresh_token')
+      .field('client_id', this.config.clientId)
+      .field('refresh_token', refreshToken)
+
+    if (this.config.certificate) {
+      request
+        .field('client_assertion_type', 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer')
+        .field('client_assertion', this.buildClientAssertion())
+    } else {
+      request.field('client_secret', this.config.clientSecret)
+    }
+
+    const body = await request.post()
+    const expiresIn = body.expires_in as number
+    return {
+      token: body.access_token as string,
+      type: 'bearer',
+      refreshToken: (body.refresh_token ?? refreshToken) as string,
+      expiresIn,
+      expiresAt: new Date(Date.now() + expiresIn * 1000),
+      scope: ((body.scope as string) ?? '').split(' '),
     }
   }
 

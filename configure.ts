@@ -91,7 +91,9 @@ export async function configure(command: Configure) {
     ${scopesLine}
   }),`
 
-    command.logger.warning('config/ally.ts already exists. Add this block inside defineConfig({}):\n')
+    command.logger.warning(
+      'config/ally.ts already exists. Add this block inside defineConfig({}):\n'
+    )
     command.logger.log(snippet)
   }
 }

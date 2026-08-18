@@ -44,6 +44,20 @@ export type MicrosoftDriverConfig = Omit<Oauth2DriverConfig, 'clientSecret'> & {
    * Defaults to false. Set to true to enable photo fetching.
    */
   fetchPhoto?: boolean
+  /**
+   * Controls the sign-in UI behavior. `none` attempts silent auth.
+   * See: https://learn.microsoft.com/en-us/entra/identity-platform/authentication-national-cloud#authentication-endpoints
+   */
+  prompt?: 'none' | 'login' | 'consent' | 'select_account'
+  /**
+   * Pre-fills the sign-in email field. Useful for multi-tenant flows.
+   */
+  loginHint?: string
+  /**
+   * Speeds up federated sign-in by skipping the home-realm discovery step.
+   * Pass the user's email domain (e.g. `"contoso.com"`).
+   */
+  domainHint?: string
 }
 
 /**
@@ -65,9 +79,4 @@ export type MicrosoftToken = {
 }
 
 export type MicrosoftScopes =
-  | 'openid'
-  | 'profile'
-  | 'email'
-  | 'User.Read'
-  | 'User.ReadBasic.All'
-  | 'offline_access'
+  'openid' | 'profile' | 'email' | 'User.Read' | 'User.ReadBasic.All' | 'offline_access'

@@ -4,6 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/@williamanjo/ally-6-microsoft.svg)](https://www.npmjs.com/package/@williamanjo/ally-6-microsoft)
 [![license](https://img.shields.io/npm/l/@williamanjo/ally-6-microsoft.svg)](./LICENSE)
 [![Certificate Auth](https://img.shields.io/badge/auth-client%20secret%20%7C%20certificate-blue.svg)](#authentication-methods)
+[![CI](https://github.com/williamanjo/ally-6-microsoft/actions/workflows/ci.yml/badge.svg)](https://github.com/williamanjo/ally-6-microsoft/actions/workflows/ci.yml)
 
 Microsoft OAuth2 driver for AdonisJS 7 and Ally v6.
 Supports authentication via **Microsoft Account**, **Azure AD**, and **Entra ID** — with two auth methods: **client secret** or **certificate (RS256 JWT)**.
@@ -212,6 +213,46 @@ Returns a base64 data URI (`data:image/jpeg;base64,...`) or `null` if the user h
 
 The content-type returned by Microsoft Graph is validated against an allowlist (`image/jpeg`, `image/png`, `image/gif`, `image/webp`) before the data URI is constructed. Any unexpected content-type returns `null`.
 
+### Refresh token
+
+To receive a refresh token, include `offline_access` in your scopes. Then call `refreshAccessToken()` with the stored refresh token:
+
+```ts
+const microsoft = ally.use('microsoft')
+const user = await microsoft.user()
+
+// store user.token.refreshToken in your database
+
+// later, when access token expires:
+const driver = ally.use('microsoft')
+const newToken = await driver.refreshAccessToken(storedRefreshToken)
+
+// newToken.token       — new access token
+// newToken.expiresAt   — expiry Date
+// newToken.refreshToken — new refresh token (or the same one if MS didn't rotate it)
+```
+
+Works with both client secret and certificate auth — no extra config needed.
+
+### Sign-in UI params
+
+Control Microsoft's sign-in dialog behavior via config:
+
+```ts
+microsoft({
+  // ...
+  prompt: 'select_account', // force account picker every time
+  loginHint: 'user@contoso.com', // pre-fill email field
+  domainHint: 'contoso.com', // skip home-realm discovery for federated tenants
+})
+```
+
+| Option | Values | Description |
+|---|---|---|
+| `prompt` | `none` \| `login` \| `consent` \| `select_account` | Controls sign-in UI. `none` attempts silent auth. |
+| `loginHint` | email string | Pre-fills the email field. |
+| `domainHint` | domain string | Skips home-realm discovery — speeds up federated sign-in. |
+
 ### Custom scopes
 
 ```ts
@@ -237,6 +278,8 @@ microsoft({
 - **Client secret authentication**
 - **Certificate authentication** (RS256 JWT `client_assertion`) — recommended for production
 - Multi-tenant support via `tenantId`
+- **Refresh token** via `refreshAccessToken()` (requires `offline_access` scope)
+- Sign-in UI control via `prompt`, `loginHint`, `domainHint`
 - Profile photo as base64 data URI (opt-in)
 - Standard Ally field mapping (`id`, `name`, `email`, `avatarUrl`, `original`)
 

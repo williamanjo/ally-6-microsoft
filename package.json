@@ -17,6 +17,7 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "pretest": "npm run lint",
+    "test": "tsx bin/test.ts",
     "build": "tsc"
   },
   "devDependencies": {
@@ -25,9 +26,11 @@
     "@adonisjs/eslint-config": "^3.0.0",
     "@adonisjs/prettier-config": "^1.4.5",
     "@adonisjs/tsconfig": "^2.0.0",
-    "@swc/core": "^1.15.18",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.3.2"
+    "@japa/assert": "^4.2.0",
+    "@japa/runner": "^5.3.0",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "@adonisjs/ally": "^6.0.0",
