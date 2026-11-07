@@ -1,6 +1,7 @@
 name: Publish
-# Publishes to npm when a version tag is pushed: git tag v1.7.0 && git push origin v1.7.0
-# Needs the NPM_TOKEN secret (npm automation/granular token with publish rights on @williamanjo/ally-6-microsoft).
+# Stages the version on npm when a version tag is pushed: git tag v1.7.0 && git push origin v1.7.0
+# NPM_TOKEN is a granular token with "Read and write (stage only)": it cannot publish by itself. The version waits
+# staged until a maintainer approves it with 2FA (npm stage list / npm stage approve <id>, or on npmjs.com).
 on:
   push:
     tags: ['v*.*.*']
@@ -25,10 +26,12 @@ jobs:
             echo "tag $GITHUB_REF_NAME does not match package.json ($versao)"
             exit 1
           fi
+      # npm stage needs a recent npm CLI
+      - run: npm install -g npm@12
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npm publish --access public --provenance
+      - run: npm stage publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
