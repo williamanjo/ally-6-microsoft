@@ -306,3 +306,13 @@ microsoft({
 ## License
 
 MIT
+
+## Releasing
+
+Bump the version (`npm version minor --no-git-tag-version`), commit it to `main`, then push a matching tag:
+
+```bash
+git tag v1.7.0 && git push origin v1.7.0
+```
+
+The **Publish** workflow checks that the tag matches `package.json`, runs typecheck, tests and build, and publishes to npm with provenance. It needs the `NPM_TOKEN` repository secret.
