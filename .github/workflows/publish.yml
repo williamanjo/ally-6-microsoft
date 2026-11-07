@@ -1,13 +1,14 @@
 name: Publish
 # Stages the version on npm when a version tag is pushed: git tag v1.7.0 && git push origin v1.7.0
-# NPM_TOKEN is a granular token with "Read and write (stage only)": it cannot publish by itself. The version waits
-# staged until a maintainer approves it with 2FA (npm stage list / npm stage approve <id>, or on npmjs.com).
+# Auth: npm Trusted Publisher (OIDC) for this repository and publish.yml, no token stored. The trusted publisher only
+# allows npm stage publish: the version waits staged until a maintainer approves it with 2FA (npm stage list /
+# npm stage approve <id>, or on npmjs.com).
 on:
   push:
     tags: ['v*.*.*']
 permissions:
   contents: read
-  # npm provenance: links the published package to this workflow run
+  # OIDC for the npm Trusted Publisher (and provenance, which links the package to this workflow run)
   id-token: write
 jobs:
   publish:
@@ -33,5 +34,3 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm stage publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
