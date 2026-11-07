@@ -1,0 +1,34 @@
+name: Publish
+# Publishes to npm when a version tag is pushed: git tag v1.7.0 && git push origin v1.7.0
+# Needs the NPM_TOKEN secret (npm automation/granular token with publish rights on @williamanjo/ally-6-microsoft).
+on:
+  push:
+    tags: ['v*.*.*']
+permissions:
+  contents: read
+  # npm provenance: links the published package to this workflow run
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: Tag matches package.json version
+        run: |
+          versao="v$(node -p "require('./package.json').version")"
+          if [ "$versao" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json ($versao)"
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
