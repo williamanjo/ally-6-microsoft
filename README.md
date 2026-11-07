@@ -315,7 +315,7 @@ Bump the version (`npm version minor --no-git-tag-version`), commit it to `main`
 git tag v1.7.0 && git push origin v1.7.0
 ```
 
-The **Publish** workflow checks that the tag matches `package.json`, runs typecheck, tests and build, and **stages** the version on npm with provenance (`npm stage publish`). The `NPM_TOKEN` repository secret is a stage-only token, so nothing goes live until a maintainer approves it with 2FA:
+The **Publish** workflow checks that the tag matches `package.json`, runs typecheck, tests and build, and **stages** the version on npm with provenance (`npm stage publish`). It authenticates as an npm **Trusted Publisher** (OIDC, no token stored) allowed only to stage, so nothing goes live until a maintainer approves it with 2FA:
 
 ```bash
 npm stage list @williamanjo/ally-6-microsoft
