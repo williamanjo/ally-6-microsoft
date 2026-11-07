@@ -211,6 +211,20 @@ microsoft({
 
 Returns a base64 data URI (`data:image/jpeg;base64,...`) or `null` if the user has no photo. Requires the `User.Read` scope (included by default).
 
+#### Photo size
+
+By default the original photo is fetched (`/me/photo/$value`), which can be large. Pass `photoSize` to fetch a smaller one, handy when the data URI is stored in a session:
+
+```ts
+microsoft({
+  // ...
+  fetchPhoto: true,
+  photoSize: '96x96',
+})
+```
+
+Supported sizes (Microsoft Graph): `48x48`, `64x64`, `96x96`, `120x120`, `240x240`, `360x360`, `432x432`, `504x504`, `648x648`. Any other value throws when the driver is created. `MICROSOFT_PHOTO_SIZES` and the `MicrosoftPhotoSize` type are exported.
+
 The content-type returned by Microsoft Graph is validated against an allowlist (`image/jpeg`, `image/png`, `image/gif`, `image/webp`) before the data URI is constructed. Any unexpected content-type returns `null`.
 
 ### Refresh token

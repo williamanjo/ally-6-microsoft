@@ -11,6 +11,23 @@ export interface MicrosoftDriverContract extends AllyDriverContract<
   version: 'oauth2'
 }
 
+/**
+ * Sizes Microsoft Graph serves for profile photos (`/me/photos/{size}/$value`).
+ * See: https://learn.microsoft.com/en-us/graph/api/profilephoto-get
+ */
+export const MICROSOFT_PHOTO_SIZES = [
+  '48x48',
+  '64x64',
+  '96x96',
+  '120x120',
+  '240x240',
+  '360x360',
+  '432x432',
+  '504x504',
+  '648x648',
+] as const
+export type MicrosoftPhotoSize = (typeof MICROSOFT_PHOTO_SIZES)[number]
+
 export type CertificateConfig = {
   /**
    * Absolute path to the private key file (.key / .pem)
@@ -44,6 +61,12 @@ export type MicrosoftDriverConfig = Omit<Oauth2DriverConfig, 'clientSecret'> & {
    * Defaults to false. Set to true to enable photo fetching.
    */
   fetchPhoto?: boolean
+  /**
+   * Size of the profile photo fetched when `fetchPhoto` is true (e.g. `"96x96"`).
+   * Smaller photos keep the data URI light enough to store in a session.
+   * Defaults to the original photo Microsoft Graph has (`/me/photo/$value`).
+   */
+  photoSize?: MicrosoftPhotoSize
   /**
    * Controls the sign-in UI behavior. `none` attempts silent auth.
    * See: https://learn.microsoft.com/en-us/entra/identity-platform/authentication-national-cloud#authentication-endpoints

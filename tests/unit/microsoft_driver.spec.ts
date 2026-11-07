@@ -172,6 +172,13 @@ test.group('Constructor validation', () => {
   test('accepts certificate config', ({ assert }) => {
     assert.doesNotThrows(() => new MicrosoftDriver(createCtx(), CERT_CONFIG))
   })
+
+  test('throws on an unsupported photoSize', ({ assert }) => {
+    assert.throws(
+      () => new MicrosoftDriver(createCtx(), { ...SECRET_CONFIG, photoSize: '100x100' as any }),
+      /invalid "photoSize"/
+    )
+  })
 })
 
 test.group('buildClientAssertion', () => {
@@ -473,6 +480,22 @@ test.group('getUserPhotoAsBase64', (group) => {
     const result = await driver.testGetUserPhoto('fake-token')
     assert.isString(result)
     assert.isTrue(result!.startsWith('data:image/jpeg;base64,'))
+  })
+
+  test('fetches the original photo when photoSize is not set', async ({ assert }) => {
+    const driver = new TestDriver(createCtx(), SECRET_CONFIG)
+    let url = ''
+    globalThis.fetch = async (u: any) => ((url = String(u)), { ok: false }) as any
+    await driver.testGetUserPhoto('fake-token')
+    assert.equal(url, 'https://graph.microsoft.com/v1.0/me/photo/$value')
+  })
+
+  test('fetches the sized photo when photoSize is set', async ({ assert }) => {
+    const driver = new TestDriver(createCtx(), { ...SECRET_CONFIG, photoSize: '96x96' })
+    let url = ''
+    globalThis.fetch = async (u: any) => ((url = String(u)), { ok: false }) as any
+    await driver.testGetUserPhoto('fake-token')
+    assert.equal(url, 'https://graph.microsoft.com/v1.0/me/photos/96x96/$value')
   })
 
   test('returns null when fetch throws', async ({ assert }) => {

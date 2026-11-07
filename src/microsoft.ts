@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { type ApiRequest, Oauth2Driver } from '@adonisjs/ally'
 import type { HttpContext } from '@adonisjs/core/http'
 import {
+  MICROSOFT_PHOTO_SIZES,
   type MicrosoftDriverConfig,
   type MicrosoftDriverConfigResolved,
   type MicrosoftScopes,
@@ -43,6 +44,15 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     this.config = config
 
     const tenantId = this.config.tenantId || 'common'
+
+    if (this.config.photoSize) {
+      if (!MICROSOFT_PHOTO_SIZES.includes(this.config.photoSize)) {
+        throw new Error(
+          `MicrosoftDriver: invalid "photoSize" "${this.config.photoSize}". Use one of: ${MICROSOFT_PHOTO_SIZES.join(', ')}`
+        )
+      }
+      this.userPhotoUrl = `https://graph.microsoft.com/v1.0/me/photos/${this.config.photoSize}/$value`
+    }
 
     this.authorizeUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`
     this.accessTokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`
