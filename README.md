@@ -1,5 +1,7 @@
 # Ally Microsoft Driver for AdonisJS 7
 
+<p align="center"><img src=".github/assets/banner.jpg" alt="ally-6-microsoft: Microsoft (Entra ID) sign-in for AdonisJS 7 with client secret or RS256 certificate" width="100%"></p>
+
 [![npm version](https://img.shields.io/npm/v/@williamanjo/ally-6-microsoft.svg)](https://www.npmjs.com/package/@williamanjo/ally-6-microsoft)
 [![npm downloads](https://img.shields.io/npm/dm/@williamanjo/ally-6-microsoft.svg)](https://www.npmjs.com/package/@williamanjo/ally-6-microsoft)
 [![license](https://img.shields.io/npm/l/@williamanjo/ally-6-microsoft.svg)](./LICENSE)
