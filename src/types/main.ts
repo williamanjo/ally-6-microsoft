@@ -68,6 +68,16 @@ export type MicrosoftDriverConfig = Omit<Oauth2DriverConfig, 'clientSecret'> & {
    */
   photoSize?: MicrosoftPhotoSize
   /**
+   * Maximum size, in bytes, of the fetched photo. A larger response is dropped
+   * (avatarUrl becomes null) so it cannot bloat the session. Defaults to 2_000_000.
+   */
+  maxPhotoBytes?: number
+  /**
+   * Timeout, in milliseconds, for the photo fetch, so a slow response cannot hang
+   * the login. Defaults to 5_000.
+   */
+  photoTimeoutMs?: number
+  /**
    * Controls the sign-in UI behavior. `none` attempts silent auth.
    * See: https://learn.microsoft.com/en-us/entra/identity-platform/authentication-national-cloud#authentication-endpoints
    */

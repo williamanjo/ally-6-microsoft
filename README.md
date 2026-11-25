@@ -149,7 +149,7 @@ const allyConfig = defineConfig({
 export default allyConfig
 ```
 
-> `clientSecret` is **required** unless `certificate` is provided. Passing neither throws at startup.
+> `clientSecret` is **required** unless `certificate` is provided. Passing neither, or a bad certificate (invalid thumbprint, unreadable or invalid key file), throws when the driver is built — on the first `ally.use('microsoft')` call, since Ally builds one driver per request. `certificate.privateKey` must be a **file path**; pasting the key contents is rejected without echoing them.
 
 ---
 
@@ -163,17 +163,19 @@ export default class AuthController {
     return ally.use('microsoft').redirect()
   }
 
-  async callback({ ally }: HttpContext) {
+  async callback({ ally, response }: HttpContext) {
     const microsoft = ally.use('microsoft')
 
-    if (microsoft.accessDenied()) return 'Access denied'
-    if (microsoft.stateMisMatch()) return 'Request expired'
-    if (microsoft.hasError()) return microsoft.getError()
+    if (microsoft.accessDenied()) return response.unauthorized({ error: 'access_denied' })
+    if (microsoft.stateMisMatch()) return response.badRequest({ error: 'request_expired' })
+    // Never return getError() as-is: it is the raw `error` query param and would be reflected as HTML
+    if (microsoft.hasError()) return response.badRequest({ error: 'oauth_error' })
 
     const user = await microsoft.user()
 
     return {
       id: user.id,
+      tenantId: user.tenantId,
       name: user.name,
       email: user.email,
       avatar: user.avatarUrl, // null by default — see fetchPhoto
@@ -181,6 +183,20 @@ export default class AuthController {
   }
 }
 ```
+
+### Identifying users safely
+
+- **Key accounts on `(tenantId, id)`, never on `email`.** `email` is Graph's `mail ?? userPrincipalName`. A tenant admin can set `mail` to any address without verifying the domain, so with the default `tenantId: 'common'` another tenant can present someone else's address.
+- `tenantId` comes from the `tid` claim of the `id_token`, so it needs the `openid` scope (on by default). `userFromToken()` returns `tenantId: null` because there is no `id_token` on that path.
+- `emailVerificationState` becomes `'verified'` only when the id_token carries an `email` claim and `xms_edov: true` (email domain owner verified); in that case `user.email` is that verified claim, not the Graph `mail`, since `xms_edov` attests the claim's domain and not whatever `mail` holds. Enable both optional claims on the app registration (Token configuration → Add optional claim → ID → `email` and `xms_edov`). Without them the state stays `'unsupported'`; `userFromToken()` is always `'unsupported'` (no id_token). Treat anything other than `'verified'` as unverified before linking by email.
+- To accept only your own organization, set `MICROSOFT_TENANT_ID` to your tenant ID instead of `common`, or check `user.tenantId` against an allowlist.
+- Use `userFromToken()` only with tokens your server obtained itself. It accepts any token Microsoft Graph accepts, including tokens issued to other apps.
+
+### CSRF protection
+
+`redirect()` sets an encrypted state cookie and a PKCE code verifier cookie; `user()` and `accessToken()` reject the callback unless both are present and match. `redirectUrl()` on its own sets no state cookie, so its callback is rejected: use `redirect()`. `stateless()` turns the state check off; use it only with your own CSRF protection.
+
+Every request the driver sends that fails at the HTTP layer — the token exchange, the refresh, and the Graph `/me` call — is re-thrown as a credential-free error (`"the token request to Microsoft failed (HTTP <status>)"` or `"the Graph user request to Microsoft failed (HTTP <status>)"`), so the client secret, certificate assertion, refresh token and the user's Bearer access token never reach your logs through the error object. The photo fetch swallows its errors and returns `null`. Note that `NODE_DEBUG=oauth_client` still prints them — never enable it in production.
 
 ## Routes
 
@@ -228,6 +244,19 @@ microsoft({
 Supported sizes (Microsoft Graph): `48x48`, `64x64`, `96x96`, `120x120`, `240x240`, `360x360`, `432x432`, `504x504`, `648x648`. Any other value throws when the driver is created. `MICROSOFT_PHOTO_SIZES` and the `MicrosoftPhotoSize` type are exported.
 
 The content-type returned by Microsoft Graph is validated against an allowlist (`image/jpeg`, `image/png`, `image/gif`, `image/webp`) before the data URI is constructed. Any unexpected content-type returns `null`.
+
+#### Size cap and timeout
+
+The photo fetch is bounded so a large or slow response cannot bloat the session or hang the login. A response over the cap, or slower than the timeout, makes `avatarUrl` `null`. Both default values can be overridden:
+
+```ts
+microsoft({
+  // ...
+  fetchPhoto: true,
+  maxPhotoBytes: 2_000_000, // default; a bigger body is dropped
+  photoTimeoutMs: 5_000, // default; a slower fetch is aborted
+})
+```
 
 ### Refresh token
 
@@ -289,7 +318,7 @@ microsoft({
 
 ## Supported features
 
-- OAuth2 Authorization Code flow
+- OAuth2 Authorization Code flow with PKCE and a required state check
 - Microsoft Account, Azure AD, and Entra ID login
 - **Client secret authentication**
 - **Certificate authentication** (RS256 JWT `client_assertion`) — recommended for production
@@ -297,7 +326,7 @@ microsoft({
 - **Refresh token** via `refreshAccessToken()` (requires `offline_access` scope)
 - Sign-in UI control via `prompt`, `loginHint`, `domainHint`
 - Profile photo as base64 data URI (opt-in)
-- Standard Ally field mapping (`id`, `name`, `email`, `avatarUrl`, `original`)
+- Standard Ally field mapping (`id`, `name`, `email`, `avatarUrl`, `original`) plus `tenantId`
 
 ## Requirements
 

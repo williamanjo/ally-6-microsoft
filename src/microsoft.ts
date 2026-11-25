@@ -1,9 +1,10 @@
-import { createSign, createPrivateKey, randomUUID } from 'node:crypto'
+import { createSign, createPrivateKey, randomUUID, type KeyObject } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { type ApiRequest, Oauth2Driver } from '@adonisjs/ally'
 import type { HttpContext } from '@adonisjs/core/http'
 import {
   MICROSOFT_PHOTO_SIZES,
+  type CertificateConfig,
   type MicrosoftDriverConfig,
   type MicrosoftDriverConfigResolved,
   type MicrosoftScopes,
@@ -12,6 +13,12 @@ import {
 import type { ApiRequestContract, RedirectRequestContract } from '@adonisjs/ally/types'
 
 const ALLOWED_PHOTO_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+
+// The photo becomes a base64 data URI that usually lands in the session. Cap it so a large
+// response cannot bloat the session, and give the fetch a deadline so it cannot hang a login.
+// Both are overridable per driver via `maxPhotoBytes` / `photoTimeoutMs` in the config.
+const DEFAULT_MAX_PHOTO_BYTES = 2_000_000
+const DEFAULT_PHOTO_TIMEOUT_MS = 5_000
 
 export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScopes> {
   protected authorizeUrl: string
@@ -24,10 +31,17 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   protected errorParamName = 'error'
   protected stateCookieName = 'microsoft_oauth_state'
   protected stateParamName = 'state'
+  // Enables Ally's built-in PKCE: binds the authorization code to the browser that started the flow
+  protected codeVerifierCookieName = 'microsoft_oauth_code_verifier'
   protected scopeParamName = 'scope'
   protected scopesSeparator = ' '
 
   public config: MicrosoftDriverConfigResolved
+
+  // Certificate material, validated and parsed when the driver is built. Ally builds one
+  // driver per request, so this runs per request (a small, constant cost), not once at boot.
+  #privateKey?: KeyObject
+  #x5t?: string
 
   constructor(ctx: HttpContext, inputConfig: MicrosoftDriverConfig) {
     const config: MicrosoftDriverConfigResolved = {
@@ -42,6 +56,10 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
 
     super(ctx, config as any)
     this.config = config
+
+    if (this.config.certificate) {
+      this.prepareCertificate(this.config.certificate)
+    }
 
     const tenantId = this.config.tenantId || 'common'
 
@@ -69,6 +87,47 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   }
 
   /**
+   * Validates the thumbprint and loads the private key when the driver is built, so a bad
+   * certificate fails on the first Microsoft request (redirect included) instead of at the
+   * token exchange, and the key is read once per request rather than on every signature.
+   */
+  protected prepareCertificate(certificate: CertificateConfig) {
+    // `privateKey` is a file path. If key contents were pasted instead, say so without
+    // echoing them: the value (and an fs error built from it) would land in logs.
+    if (/-----BEGIN|\n/.test(certificate.privateKey)) {
+      throw new Error(
+        'MicrosoftDriver: "certificate.privateKey" must be the path to the key file, not the key contents.'
+      )
+    }
+
+    const hex = certificate.thumbprint.replace(/:/g, '')
+    if (!/^[0-9a-fA-F]{40}$/.test(hex)) {
+      throw new Error(
+        `MicrosoftDriver: invalid certificate "thumbprint". Expected a 40-character SHA-1 hex string (colons allowed), got "${certificate.thumbprint}".`
+      )
+    }
+    this.#x5t = Buffer.from(hex, 'hex').toString('base64url')
+
+    let keyBuffer: Buffer
+    try {
+      keyBuffer = readFileSync(certificate.privateKey)
+    } catch (cause) {
+      throw new Error(
+        `MicrosoftDriver: could not read the certificate private key file at "${certificate.privateKey}".`,
+        { cause }
+      )
+    }
+    try {
+      this.#privateKey = createPrivateKey({ key: keyBuffer, format: 'pem' })
+    } catch (cause) {
+      throw new Error(
+        `MicrosoftDriver: the certificate private key at "${certificate.privateKey}" is not a valid PEM key.`,
+        { cause }
+      )
+    }
+  }
+
+  /**
    * Builds a signed JWT client_assertion for certificate-based authentication.
    *
    * Microsoft requires:
@@ -79,15 +138,10 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
    * See: https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials
    */
   protected buildClientAssertion(): string {
-    const { privateKey, thumbprint } = this.config.certificate!
     const tenantId = this.config.tenantId || 'common'
-
-    // Normalize thumbprint: strip colons, decode hex → base64url
-    const x5t = Buffer.from(thumbprint.replace(/:/g, ''), 'hex').toString('base64url')
-
     const now = Math.floor(Date.now() / 1000)
 
-    const header = { alg: 'RS256', typ: 'JWT', x5t }
+    const header = { alg: 'RS256', typ: 'JWT', x5t: this.#x5t }
     const payload = {
       aud: `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
       iss: this.config.clientId,
@@ -100,16 +154,9 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     const encode = (obj: object) => Buffer.from(JSON.stringify(obj)).toString('base64url')
     const signingInput = `${encode(header)}.${encode(payload)}`
 
-    let keyBuffer: Buffer
-    try {
-      keyBuffer = readFileSync(privateKey)
-    } catch {
-      throw new Error(`MicrosoftDriver: certificate private key file not found: "${privateKey}"`)
-    }
-    const keyObject = createPrivateKey({ key: keyBuffer, format: 'pem' })
     const sign = createSign('RSA-SHA256')
     sign.update(signingInput)
-    const signature = sign.sign(keyObject, 'base64url')
+    const signature = sign.sign(this.#privateKey!, 'base64url')
 
     return `${signingInput}.${signature}`
   }
@@ -123,8 +170,10 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
       .field('code', this.ctx.request.input(this.codeParamName))
 
     if (this.config.certificate) {
-      // Certificate auth: signed JWT assertion replaces clientSecret
+      // Certificate auth: signed JWT assertion replaces clientSecret. The base getAccessToken
+      // always sets an (empty) client_secret field, so drop it to send a single client credential.
       request
+        .clearField('client_secret')
         .field('client_assertion_type', 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer')
         .field('client_assertion', this.buildClientAssertion())
     } else {
@@ -153,15 +202,29 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
       request.field('client_secret', this.config.clientSecret)
     }
 
-    const body = await request.post()
-    const expiresIn = body.expires_in as number
+    // The token endpoint answers JSON; without this the HTTP client defaults to text and every
+    // field below reads as undefined, so a failed refresh would be reported as a success.
+    request.parseAs('json')
+    let body: Record<string, unknown>
+    try {
+      body = await request.post()
+    } catch (error) {
+      // Drop the request body (refresh_token, client credential) from the surfaced error
+      throw this.sanitizeTokenError(error)
+    }
+
+    const accessToken = body.access_token as string | undefined
+    if (!accessToken) {
+      throw new Error('MicrosoftDriver: the token endpoint did not return an "access_token".')
+    }
+    const expiresIn = Number(body.expires_in ?? 0)
     return {
-      token: body.access_token as string,
+      token: accessToken,
       type: 'bearer',
       refreshToken: (body.refresh_token ?? refreshToken) as string,
       expiresIn,
       expiresAt: new Date(Date.now() + expiresIn * 1000),
-      scope: ((body.scope as string) ?? '').split(' '),
+      scope: ((body.scope as string) ?? '').split(' ').filter(Boolean),
     }
   }
 
@@ -177,15 +240,104 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   }
 
   /**
+   * The base check treats a missing state cookie and a missing state param
+   * as a match (undefined === undefined). Require a stored state.
+   */
+  stateMisMatch(): boolean {
+    if (this.isStateless) {
+      return false
+    }
+    return !this.stateCookieValue || super.stateMisMatch()
+  }
+
+  /**
+   * Exchanges the authorization code for a token, replacing any HTTP-layer error with one
+   * that does not carry the request body. The underlying ky error keeps the POST options
+   * (client_secret, client_assertion, refresh_token) on the thrown object, so a consumer
+   * that serializes the whole error would leak the credential.
+   */
+  async accessToken(callback?: (request: ApiRequestContract) => void) {
+    try {
+      return await super.accessToken(callback)
+    } catch (error) {
+      throw this.sanitizeTokenError(error)
+    }
+  }
+
+  /**
+   * Returns a credential-free error for HTTP-layer failures, and leaves every other error
+   * (state mismatch, missing code, a missing-token error) untouched. ky errors keep the
+   * request options and Request on the thrown object: the token POST body (client secret,
+   * assertion, refresh token) and the Graph `Authorization: Bearer` header.
+   */
+  protected sanitizeTokenError(error: unknown, what = 'token request'): unknown {
+    const isHttp =
+      !!error && typeof error === 'object' && ('response' in error || 'request' in error)
+    if (!isHttp) return error
+    const status = (error as { response?: { status?: number } }).response?.status
+    return new Error(
+      `MicrosoftDriver: the ${what} to Microsoft failed${status ? ` (HTTP ${status})` : ''}.`
+    )
+  }
+
+  /**
    * Returns details for the authorized user
    */
   async user(callback?: (request: ApiRequestContract) => void) {
     const accessToken = await this.accessToken(callback)
     const user = await this.getUserInfo(accessToken.token, callback)
+    const claims = this.idTokenClaims((accessToken as Record<string, unknown>).id_token)
+    const verified = this.verifiedEmail(claims, user.email)
     return {
       ...user,
+      tenantId: typeof claims?.tid === 'string' ? (claims.tid as string) : null,
+      email: verified.email,
+      emailVerificationState: verified.state,
       token: accessToken,
     }
+  }
+
+  /**
+   * Decodes the id_token payload returned by the token endpoint. The token came straight
+   * from Microsoft over TLS in this same request, so no signature check is needed
+   * (OIDC Core 3.1.3.7). Returns null when the `openid` scope was not requested.
+   */
+  protected idTokenClaims(idToken: unknown): Record<string, unknown> | null {
+    if (typeof idToken !== 'string') return null
+    try {
+      const payload = Buffer.from(idToken.split('.')[1] ?? '', 'base64url').toString()
+      const claims = JSON.parse(payload)
+      return claims && typeof claims === 'object' ? claims : null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Decides the email to return and its verification state.
+   *
+   * `xms_edov` ("email domain owner verified") attests the domain of the id_token's own
+   * `email` claim, NOT the Graph `mail` attribute. Reporting `verified` for a different
+   * address than the one that was vouched for would re-open the nOAuth / claim-mismatch
+   * hole, so `verified` is returned only together with that claim's email. A tenant admin
+   * can still set Graph `mail` freely, so without a positive `xms_edov` the Graph-derived
+   * email is handed back as `unsupported` (or `unverified` when the claim says so).
+   *
+   * Requires the optional `email` and `xms_edov` claims on the app registration; without
+   * them the state stays `unsupported`.
+   */
+  protected verifiedEmail(
+    claims: Record<string, unknown> | null,
+    graphEmail: string
+  ): { email: string; state: 'verified' | 'unverified' | 'unsupported' } {
+    const claimEmail = typeof claims?.email === 'string' ? (claims.email as string) : null
+    if (claims?.xms_edov === true && claimEmail) {
+      return { email: claimEmail, state: 'verified' }
+    }
+    if (claims?.xms_edov === false) {
+      return { email: graphEmail, state: 'unverified' }
+    }
+    return { email: graphEmail, state: 'unsupported' }
   }
 
   /**
@@ -195,6 +347,8 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     const user = await this.getUserInfo(token, callback)
     return {
       ...user,
+      // No id_token on this path, so the tenant is unknown
+      tenantId: null,
       token: { token: token, type: 'bearer' as const },
     }
   }
@@ -205,11 +359,16 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
    * Returns null if the user has no photo or if the request fails.
    */
   protected async getUserPhotoAsBase64(accessToken: string): Promise<string | null> {
+    const maxBytes = this.config.maxPhotoBytes ?? DEFAULT_MAX_PHOTO_BYTES
+    const timeoutMs = this.config.photoTimeoutMs ?? DEFAULT_PHOTO_TIMEOUT_MS
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const response = await fetch(this.userPhotoUrl, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
+        signal: controller.signal,
       })
 
       if (!response.ok) {
@@ -220,12 +379,19 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
       const contentType = rawContentType.split(';')[0].trim().toLowerCase()
       if (!ALLOWED_PHOTO_CONTENT_TYPES.includes(contentType)) return null
 
+      // Early out on a declared size before downloading the body
+      const declared = Number(response.headers.get('content-length'))
+      if (Number.isFinite(declared) && declared > maxBytes) return null
+
       const buffer = await response.arrayBuffer()
+      if (buffer.byteLength > maxBytes) return null
       const base64 = Buffer.from(buffer).toString('base64')
 
       return `data:${contentType};base64,${base64}`
     } catch {
       return null
+    } finally {
+      clearTimeout(timeout)
     }
   }
 
@@ -243,7 +409,13 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
       callback(request)
     }
 
-    const body = await request.get()
+    let body: Record<string, unknown>
+    try {
+      body = await request.get()
+    } catch (error) {
+      // A ky error here carries the `Authorization: Bearer <access token>` header
+      throw this.sanitizeTokenError(error, 'Graph user request')
+    }
 
     const avatarUrl =
       this.config.fetchPhoto === true ? await this.getUserPhotoAsBase64(accessToken) : null

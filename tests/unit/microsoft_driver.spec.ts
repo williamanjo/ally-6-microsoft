@@ -3,6 +3,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto'
 import { unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { inspect } from 'node:util'
 import { MicrosoftDriver } from '../../src/microsoft.js'
 import type { MicrosoftDriverConfig } from '../../src/types/main.js'
 import type { HttpContext } from '@adonisjs/core/http'
@@ -37,6 +38,31 @@ function createCtx(queryParams: Record<string, string> = {}): HttpContext {
     },
     response: { clearCookie: () => {} },
   } as any
+}
+
+function createCallbackCtx(
+  queryParams: Record<string, string>,
+  cookies: Record<string, string>,
+  setCookies: Record<string, string> = {}
+): HttpContext {
+  return {
+    request: {
+      input: (name: string, fallback?: unknown) => queryParams[name] ?? fallback,
+      // Mirrors AdonisJS: a missing encrypted cookie reads as undefined
+      encryptedCookie: (name: string) => cookies[name],
+    },
+    response: {
+      clearCookie: () => {},
+      encryptedCookie: (name: string, value: string) => {
+        setCookies[name] = value
+      },
+    },
+  } as any
+}
+
+function fakeIdToken(claims: Record<string, unknown>) {
+  const part = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  return `${part({ alg: 'RS256', typ: 'JWT' })}.${part(claims)}.sig`
 }
 
 const BASE_CONFIG = {
@@ -109,6 +135,7 @@ class SpyDriver extends MicrosoftDriver {
         self.fields.set(k, v)
         return req
       },
+      getResponseType: () => 'json',
       get: async () => self._getBody,
       post: async () => self._postBody,
     }
@@ -117,10 +144,16 @@ class SpyDriver extends MicrosoftDriver {
 
   testConfigureAccessTokenRequest() {
     const self = this
+    // seed client_secret like the base getAccessToken does, so clearField is observable
+    self.fields.set('client_secret', '')
     const req: any = {
       header: () => req,
       field: (k: string, v: string) => {
         self.fields.set(k, v)
+        return req
+      },
+      clearField: (k: string) => {
+        self.fields.delete(k)
         return req
       },
     }
@@ -238,12 +271,29 @@ test.group('buildClientAssertion', () => {
     assert.equal(header.x5t, expected)
   })
 
-  test('throws with clear message when private key file does not exist', ({ assert }) => {
-    const driver = new TestDriver(createCtx(), {
-      ...CERT_CONFIG,
-      certificate: { privateKey: '/nonexistent/path/private.key', thumbprint: TEST_THUMBPRINT },
-    })
-    assert.throws(() => driver.testBuildClientAssertion(), /certificate private key file not found/)
+  test('throws at construction when the private key file does not exist', ({ assert }) => {
+    assert.throws(
+      () =>
+        new TestDriver(createCtx(), {
+          ...CERT_CONFIG,
+          certificate: {
+            privateKey: '/nonexistent/path/private.key',
+            thumbprint: TEST_THUMBPRINT,
+          },
+        }),
+      /could not read the certificate private key/
+    )
+  })
+
+  test('throws at construction on an invalid thumbprint', ({ assert }) => {
+    assert.throws(
+      () =>
+        new TestDriver(createCtx(), {
+          ...CERT_CONFIG,
+          certificate: { privateKey: TEST_KEY_PATH, thumbprint: 'not-hex' },
+        }),
+      /invalid certificate "thumbprint"/
+    )
   })
 })
 
@@ -505,5 +555,326 @@ test.group('getUserPhotoAsBase64', (group) => {
     }
     const result = await driver.testGetUserPhoto('fake-token')
     assert.isNull(result)
+  })
+})
+
+test.group('Callback state and PKCE binding', () => {
+  const STATE_COOKIE = 'microsoft_oauth_state'
+  const VERIFIER_COOKIE = 'microsoft_oauth_code_verifier'
+
+  test('stateMisMatch is true when both state cookie and state param are absent', ({ assert }) => {
+    const driver = new MicrosoftDriver(createCallbackCtx({ code: 'c' }, {}), SECRET_CONFIG)
+    assert.isTrue(driver.stateMisMatch())
+  })
+
+  test('stateMisMatch is true when the state param differs from the cookie', ({ assert }) => {
+    const ctx = createCallbackCtx(
+      { code: 'c', state: 'other' },
+      { [STATE_COOKIE]: 'abc', [VERIFIER_COOKIE]: 'v' }
+    )
+    assert.isTrue(new MicrosoftDriver(ctx, SECRET_CONFIG).stateMisMatch())
+  })
+
+  test('stateMisMatch is true when the PKCE verifier cookie is missing', ({ assert }) => {
+    const ctx = createCallbackCtx({ code: 'c', state: 'abc' }, { [STATE_COOKIE]: 'abc' })
+    assert.isTrue(new MicrosoftDriver(ctx, SECRET_CONFIG).stateMisMatch())
+  })
+
+  test('stateMisMatch is false when state and verifier cookies match', ({ assert }) => {
+    const ctx = createCallbackCtx(
+      { code: 'c', state: 'abc' },
+      { [STATE_COOKIE]: 'abc', [VERIFIER_COOKIE]: 'v' }
+    )
+    assert.isFalse(new MicrosoftDriver(ctx, SECRET_CONFIG).stateMisMatch())
+  })
+
+  test('stateMisMatch stays false in stateless mode', ({ assert }) => {
+    const driver = new MicrosoftDriver(createCallbackCtx({ code: 'c' }, {}), SECRET_CONFIG)
+    assert.isFalse(driver.stateless().stateMisMatch())
+  })
+
+  test('user() rejects a callback carrying only a code', async ({ assert }) => {
+    const driver = new SpyDriver(createCallbackCtx({ code: 'attacker-code' }, {}), SECRET_CONFIG)
+    driver.setPostBody({ access_token: 't' })
+    driver.setGetBody({ id: 'attacker-oid' })
+    await assert.rejects(() => driver.user(), /state/i)
+  })
+
+  test('redirectUrl sends an S256 code_challenge and stores the verifier', async ({ assert }) => {
+    const set: Record<string, string> = {}
+    const driver = new MicrosoftDriver(createCallbackCtx({}, {}, set), SECRET_CONFIG)
+    const url = new URL(await driver.redirectUrl())
+    assert.equal(url.searchParams.get('code_challenge_method'), 'S256')
+    assert.isString(url.searchParams.get('code_challenge'))
+    assert.isString(set[VERIFIER_COOKIE])
+  })
+
+  test('user() sends code_verifier and returns tenantId from the id_token', async ({ assert }) => {
+    const ctx = createCallbackCtx(
+      { code: 'c', state: 'abc' },
+      { [STATE_COOKIE]: 'abc', [VERIFIER_COOKIE]: 'verifier-1' }
+    )
+    const driver = new SpyDriver(ctx, SECRET_CONFIG)
+    driver.setPostBody({ access_token: 't', id_token: fakeIdToken({ tid: 'tenant-1' }) })
+    driver.setGetBody({ id: 'oid-1', mail: 'a@example.test' })
+    const user = await driver.user()
+    assert.equal(driver.fields.get('code_verifier'), 'verifier-1')
+    assert.equal(user.tenantId, 'tenant-1')
+    assert.equal(user.id, 'oid-1')
+  })
+
+  test('tenantId is null without an id_token and from userFromToken', async ({ assert }) => {
+    const ctx = createCallbackCtx(
+      { code: 'c', state: 'abc' },
+      { [STATE_COOKIE]: 'abc', [VERIFIER_COOKIE]: 'v' }
+    )
+    const driver = new SpyDriver(ctx, SECRET_CONFIG)
+    driver.setPostBody({ access_token: 't', id_token: 'not-a-jwt' })
+    driver.setGetBody({ id: 'oid-1' })
+    const fromCallback = await driver.user()
+    const fromToken = await driver.userFromToken('t')
+    assert.isNull(fromCallback.tenantId)
+    assert.isNull(fromToken.tenantId)
+  })
+})
+
+test.group('2.0 hardening', () => {
+  const STATE_COOKIE = 'microsoft_oauth_state'
+  const VERIFIER_COOKIE = 'microsoft_oauth_code_verifier'
+  const originalFetch = globalThis.fetch
+
+  function boundCtx() {
+    return createCallbackCtx(
+      { code: 'c', state: 'abc' },
+      { [STATE_COOKIE]: 'abc', [VERIFIER_COOKIE]: 'v' }
+    )
+  }
+
+  test('refreshAccessToken throws when the token endpoint omits access_token', async ({
+    assert,
+  }) => {
+    const driver = new SpyDriver(createCtx(), SECRET_CONFIG)
+    driver.setPostBody({ error: 'invalid_grant' })
+    await assert.rejects(() => driver.testRefreshAccessToken('rt'), /access_token/)
+  })
+
+  test('refreshAccessToken requests JSON parsing', async ({ assert }) => {
+    let parsedAs = ''
+    class ParseSpy extends MicrosoftDriver {
+      protected override httpClient(_url: string): any {
+        const req: any = {
+          header: () => req,
+          field: () => req,
+          parseAs: (t: string) => ((parsedAs = t), req),
+          post: async () => ({ access_token: 't', expires_in: 60, scope: '' }),
+        }
+        return req
+      }
+      run() {
+        return this.refreshAccessToken('rt')
+      }
+    }
+    await new ParseSpy(createCtx(), SECRET_CONFIG).run()
+    assert.equal(parsedAs, 'json')
+  })
+
+  test('getUserPhotoAsBase64 returns null when the body exceeds the size cap', async ({
+    assert,
+  }) => {
+    const driver = new TestDriver(createCtx(), SECRET_CONFIG)
+    globalThis.fetch = async () =>
+      ({
+        ok: true,
+        headers: { get: () => 'image/jpeg' },
+        arrayBuffer: async () => new ArrayBuffer(2_000_001),
+      }) as any
+    try {
+      assert.isNull(await driver.testGetUserPhoto('fake-token'))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('getUserPhotoAsBase64 honors a custom maxPhotoBytes', async ({ assert }) => {
+    const driver = new TestDriver(createCtx(), { ...SECRET_CONFIG, maxPhotoBytes: 8 })
+    globalThis.fetch = async () =>
+      ({
+        ok: true,
+        headers: { get: () => 'image/jpeg' },
+        arrayBuffer: async () => new ArrayBuffer(9),
+      }) as any
+    try {
+      assert.isNull(await driver.testGetUserPhoto('fake-token'))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('getUserPhotoAsBase64 passes an abort signal', async ({ assert }) => {
+    const driver = new TestDriver(createCtx(), SECRET_CONFIG)
+    let hadSignal = false
+    globalThis.fetch = async (_u: any, init: any) => (
+      (hadSignal = init?.signal instanceof AbortSignal),
+      { ok: false } as any
+    )
+    try {
+      await driver.testGetUserPhoto('fake-token')
+      assert.isTrue(hadSignal)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('refreshAccessToken surfaces a credential-free error on an HTTP failure', async ({
+    assert,
+  }) => {
+    class FailDriver extends MicrosoftDriver {
+      protected override httpClient(_url: string): any {
+        const req: any = {
+          header: () => req,
+          field: () => req,
+          parseAs: () => req,
+          post: async () => {
+            throw Object.assign(new Error('Request failed with status 400'), {
+              response: { status: 400 },
+              options: { body: 'client_secret=supersecret&refresh_token=rt-value' },
+            })
+          },
+        }
+        return req
+      }
+      run(token: string) {
+        return this.refreshAccessToken(token)
+      }
+    }
+    const driver = new FailDriver(createCtx(), SECRET_CONFIG)
+    await assert.rejects(
+      () => driver.run('rt-value'),
+      /token request to Microsoft failed \(HTTP 400\)/
+    )
+    try {
+      await driver.run('rt-value')
+    } catch (e: any) {
+      assert.isUndefined(e.response)
+      assert.isUndefined(e.options)
+      assert.notInclude(JSON.stringify({ msg: e.message, own: { ...e } }), 'supersecret')
+    }
+  })
+
+  test('sanitizeTokenError leaves non-HTTP errors untouched', ({ assert }) => {
+    class ExposeDriver extends MicrosoftDriver {
+      expose(error: unknown) {
+        return this.sanitizeTokenError(error)
+      }
+    }
+    const driver = new ExposeDriver(createCtx(), SECRET_CONFIG)
+    const validationError = new Error('E_OAUTH_STATE_MISMATCH')
+    assert.equal(driver.expose(validationError), validationError)
+    const httpError = driver.expose({ response: { status: 401 } })
+    assert.instanceOf(httpError, Error)
+    assert.match((httpError as Error).message, /HTTP 401/)
+  })
+
+  test('user() marks the email verified from the xms_edov claim', async ({ assert }) => {
+    const driver = new SpyDriver(boundCtx(), SECRET_CONFIG)
+    driver.setPostBody({
+      access_token: 't',
+      id_token: fakeIdToken({ tid: 't1', xms_edov: true, email: 'person@contoso.com' }),
+    })
+    driver.setGetBody({ id: 'oid', mail: 'person@contoso.com' })
+    const user = await driver.user()
+    assert.equal(user.emailVerificationState, 'verified')
+    assert.equal(user.email, 'person@contoso.com')
+    assert.equal(user.tenantId, 't1')
+  })
+
+  test('user() returns the verified id_token email, not the Graph mail, when they differ', async ({
+    assert,
+  }) => {
+    const driver = new SpyDriver(boundCtx(), SECRET_CONFIG)
+    driver.setPostBody({
+      access_token: 't',
+      id_token: fakeIdToken({ tid: 't1', xms_edov: true, email: 'real@contoso.com' }),
+    })
+    // A tenant admin set Graph mail to a victim's address; the verified claim must win
+    driver.setGetBody({ id: 'oid', mail: 'victim@other.com' })
+    const user = await driver.user()
+    assert.equal(user.emailVerificationState, 'verified')
+    assert.equal(user.email, 'real@contoso.com')
+  })
+
+  test('user() stays unsupported when xms_edov is true but no email claim is present', async ({
+    assert,
+  }) => {
+    const driver = new SpyDriver(boundCtx(), SECRET_CONFIG)
+    driver.setPostBody({ access_token: 't', id_token: fakeIdToken({ tid: 't1', xms_edov: true }) })
+    driver.setGetBody({ id: 'oid', mail: 'person@contoso.com' })
+    const user = await driver.user()
+    assert.equal(user.emailVerificationState, 'unsupported')
+    assert.equal(user.email, 'person@contoso.com')
+  })
+
+  test('user() marks the email unverified when xms_edov is false', async ({ assert }) => {
+    const driver = new SpyDriver(boundCtx(), SECRET_CONFIG)
+    driver.setPostBody({ access_token: 't', id_token: fakeIdToken({ tid: 't1', xms_edov: false }) })
+    driver.setGetBody({ id: 'oid', mail: 'person@contoso.com' })
+    const user = await driver.user()
+    assert.equal(user.emailVerificationState, 'unverified')
+    assert.equal(user.email, 'person@contoso.com')
+  })
+
+  test('user() keeps emailVerificationState unsupported without the claim', async ({ assert }) => {
+    const driver = new SpyDriver(boundCtx(), SECRET_CONFIG)
+    driver.setPostBody({ access_token: 't', id_token: fakeIdToken({ tid: 't1' }) })
+    driver.setGetBody({ id: 'oid', mail: 'person@contoso.com' })
+    const user = await driver.user()
+    assert.equal(user.emailVerificationState, 'unsupported')
+  })
+})
+
+test.group('run-2 audit fixes', () => {
+  test('a Graph /me HTTP failure surfaces without the Bearer token', async ({ assert }) => {
+    class GraphFailDriver extends MicrosoftDriver {
+      protected override httpClient(_url: string): any {
+        const req: any = {
+          header: () => req,
+          parseAs: () => req,
+          get: async () => {
+            throw Object.assign(new Error('Request failed with status code 401'), {
+              response: { status: 401 },
+              options: { headers: { Authorization: 'Bearer DUMMY-TOKEN-123' } },
+              request: { headers: { Authorization: 'Bearer DUMMY-TOKEN-123' } },
+            })
+          },
+        }
+        return req
+      }
+    }
+    const driver = new GraphFailDriver(createCtx(), SECRET_CONFIG)
+    let caught: any
+    try {
+      await driver.userFromToken('DUMMY-TOKEN-123')
+    } catch (error) {
+      caught = error
+    }
+    assert.match(caught.message, /Graph user request to Microsoft failed \(HTTP 401\)/)
+    assert.isUndefined(caught.options)
+    assert.isUndefined(caught.request)
+    assert.notInclude(inspect(caught, { depth: 5 }), 'DUMMY-TOKEN-123')
+  })
+
+  test('inline key contents are rejected without echoing them', ({ assert }) => {
+    const pem = '-----BEGIN PRIVATE KEY-----\nSECRET-KEY-MATERIAL\n-----END PRIVATE KEY-----'
+    let caught: any
+    try {
+      new MicrosoftDriver(createCtx(), {
+        ...BASE_CONFIG,
+        certificate: { privateKey: pem, thumbprint: TEST_THUMBPRINT },
+      })
+    } catch (error) {
+      caught = error
+    }
+    assert.match(caught.message, /must be the path to the key file/)
+    assert.notInclude(inspect(caught, { depth: 5 }), 'SECRET-KEY-MATERIAL')
   })
 })
