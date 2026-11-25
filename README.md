@@ -184,8 +184,9 @@ export default class AuthController {
 
 ### Identifying users safely
 
-- **Key accounts on `(tenantId, id)`, never on `email`.** `email` is Graph's `mail ?? userPrincipalName`. A tenant admin can set `mail` to any address without verifying the domain, so with the default `tenantId: 'common'` another tenant can present someone else's address. `emailVerificationState` is always `'unsupported'` for this reason.
+- **Key accounts on `(tenantId, id)`, never on `email`.** `email` is Graph's `mail ?? userPrincipalName`. A tenant admin can set `mail` to any address without verifying the domain, so with the default `tenantId: 'common'` another tenant can present someone else's address.
 - `tenantId` comes from the `tid` claim of the `id_token`, so it needs the `openid` scope (on by default). `userFromToken()` returns `tenantId: null` because there is no `id_token` on that path.
+- `emailVerificationState` is `'verified'` or `'unverified'` from the `xms_edov` id_token claim when you enable that optional claim on the app registration (Token configuration → Add optional claim → ID → `xms_edov`); without it, it stays `'unsupported'`. On `userFromToken()` it is `'unsupported'` (no id_token). Treat anything other than `'verified'` as unverified before linking by email.
 - To accept only your own organization, set `MICROSOFT_TENANT_ID` to your tenant ID instead of `common`, or check `user.tenantId` against an allowlist.
 - Use `userFromToken()` only with tokens your server obtained itself. It accepts any token Microsoft Graph accepts, including tokens issued to other apps.
 
