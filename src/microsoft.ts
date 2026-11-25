@@ -24,6 +24,8 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   protected errorParamName = 'error'
   protected stateCookieName = 'microsoft_oauth_state'
   protected stateParamName = 'state'
+  // Enables Ally's built-in PKCE: binds the authorization code to the browser that started the flow
+  protected codeVerifierCookieName = 'microsoft_oauth_code_verifier'
   protected scopeParamName = 'scope'
   protected scopesSeparator = ' '
 
@@ -177,6 +179,17 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   }
 
   /**
+   * The base check treats a missing state cookie and a missing state param
+   * as a match (undefined === undefined). Require a stored state.
+   */
+  stateMisMatch(): boolean {
+    if (this.isStateless) {
+      return false
+    }
+    return !this.stateCookieValue || super.stateMisMatch()
+  }
+
+  /**
    * Returns details for the authorized user
    */
   async user(callback?: (request: ApiRequestContract) => void) {
@@ -184,7 +197,24 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     const user = await this.getUserInfo(accessToken.token, callback)
     return {
       ...user,
+      tenantId: this.tenantIdFromIdToken((accessToken as Record<string, unknown>).id_token),
       token: accessToken,
+    }
+  }
+
+  /**
+   * Reads the `tid` claim from the id_token returned by the token endpoint.
+   * The token came straight from Microsoft over TLS in this same request, so
+   * no signature check is needed (OIDC Core 3.1.3.7). Returns null when the
+   * `openid` scope was not requested or the claim is missing.
+   */
+  protected tenantIdFromIdToken(idToken: unknown): string | null {
+    if (typeof idToken !== 'string') return null
+    try {
+      const payload = JSON.parse(Buffer.from(idToken.split('.')[1] ?? '', 'base64url').toString())
+      return typeof payload.tid === 'string' ? payload.tid : null
+    } catch {
+      return null
     }
   }
 
@@ -195,6 +225,8 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     const user = await this.getUserInfo(token, callback)
     return {
       ...user,
+      // No id_token on this path, so the tenant is unknown
+      tenantId: null,
       token: { token: token, type: 'bearer' as const },
     }
   }

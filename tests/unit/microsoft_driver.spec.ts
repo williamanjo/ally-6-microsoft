@@ -39,6 +39,31 @@ function createCtx(queryParams: Record<string, string> = {}): HttpContext {
   } as any
 }
 
+function createCallbackCtx(
+  queryParams: Record<string, string>,
+  cookies: Record<string, string>,
+  setCookies: Record<string, string> = {}
+): HttpContext {
+  return {
+    request: {
+      input: (name: string, fallback?: unknown) => queryParams[name] ?? fallback,
+      // Mirrors AdonisJS: a missing encrypted cookie reads as undefined
+      encryptedCookie: (name: string) => cookies[name],
+    },
+    response: {
+      clearCookie: () => {},
+      encryptedCookie: (name: string, value: string) => {
+        setCookies[name] = value
+      },
+    },
+  } as any
+}
+
+function fakeIdToken(claims: Record<string, unknown>) {
+  const part = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  return `${part({ alg: 'RS256', typ: 'JWT' })}.${part(claims)}.sig`
+}
+
 const BASE_CONFIG = {
   clientId: 'test-client-id',
   callbackUrl: 'http://localhost/callback',
@@ -109,6 +134,7 @@ class SpyDriver extends MicrosoftDriver {
         self.fields.set(k, v)
         return req
       },
+      getResponseType: () => 'json',
       get: async () => self._getBody,
       post: async () => self._postBody,
     }
@@ -505,5 +531,85 @@ test.group('getUserPhotoAsBase64', (group) => {
     }
     const result = await driver.testGetUserPhoto('fake-token')
     assert.isNull(result)
+  })
+})
+
+test.group('Callback state and PKCE binding', () => {
+  const STATE_COOKIE = 'microsoft_oauth_state'
+  const VERIFIER_COOKIE = 'microsoft_oauth_code_verifier'
+
+  test('stateMisMatch is true when both state cookie and state param are absent', ({ assert }) => {
+    const driver = new MicrosoftDriver(createCallbackCtx({ code: 'c' }, {}), SECRET_CONFIG)
+    assert.isTrue(driver.stateMisMatch())
+  })
+
+  test('stateMisMatch is true when the state param differs from the cookie', ({ assert }) => {
+    const ctx = createCallbackCtx(
+      { code: 'c', state: 'other' },
+      { [STATE_COOKIE]: 'abc', [VERIFIER_COOKIE]: 'v' }
+    )
+    assert.isTrue(new MicrosoftDriver(ctx, SECRET_CONFIG).stateMisMatch())
+  })
+
+  test('stateMisMatch is true when the PKCE verifier cookie is missing', ({ assert }) => {
+    const ctx = createCallbackCtx({ code: 'c', state: 'abc' }, { [STATE_COOKIE]: 'abc' })
+    assert.isTrue(new MicrosoftDriver(ctx, SECRET_CONFIG).stateMisMatch())
+  })
+
+  test('stateMisMatch is false when state and verifier cookies match', ({ assert }) => {
+    const ctx = createCallbackCtx(
+      { code: 'c', state: 'abc' },
+      { [STATE_COOKIE]: 'abc', [VERIFIER_COOKIE]: 'v' }
+    )
+    assert.isFalse(new MicrosoftDriver(ctx, SECRET_CONFIG).stateMisMatch())
+  })
+
+  test('stateMisMatch stays false in stateless mode', ({ assert }) => {
+    const driver = new MicrosoftDriver(createCallbackCtx({ code: 'c' }, {}), SECRET_CONFIG)
+    assert.isFalse(driver.stateless().stateMisMatch())
+  })
+
+  test('user() rejects a callback carrying only a code', async ({ assert }) => {
+    const driver = new SpyDriver(createCallbackCtx({ code: 'attacker-code' }, {}), SECRET_CONFIG)
+    driver.setPostBody({ access_token: 't' })
+    driver.setGetBody({ id: 'attacker-oid' })
+    await assert.rejects(() => driver.user(), /state/i)
+  })
+
+  test('redirectUrl sends an S256 code_challenge and stores the verifier', async ({ assert }) => {
+    const set: Record<string, string> = {}
+    const driver = new MicrosoftDriver(createCallbackCtx({}, {}, set), SECRET_CONFIG)
+    const url = new URL(await driver.redirectUrl())
+    assert.equal(url.searchParams.get('code_challenge_method'), 'S256')
+    assert.isString(url.searchParams.get('code_challenge'))
+    assert.isString(set[VERIFIER_COOKIE])
+  })
+
+  test('user() sends code_verifier and returns tenantId from the id_token', async ({ assert }) => {
+    const ctx = createCallbackCtx(
+      { code: 'c', state: 'abc' },
+      { [STATE_COOKIE]: 'abc', [VERIFIER_COOKIE]: 'verifier-1' }
+    )
+    const driver = new SpyDriver(ctx, SECRET_CONFIG)
+    driver.setPostBody({ access_token: 't', id_token: fakeIdToken({ tid: 'tenant-1' }) })
+    driver.setGetBody({ id: 'oid-1', mail: 'a@example.test' })
+    const user = await driver.user()
+    assert.equal(driver.fields.get('code_verifier'), 'verifier-1')
+    assert.equal(user.tenantId, 'tenant-1')
+    assert.equal(user.id, 'oid-1')
+  })
+
+  test('tenantId is null without an id_token and from userFromToken', async ({ assert }) => {
+    const ctx = createCallbackCtx(
+      { code: 'c', state: 'abc' },
+      { [STATE_COOKIE]: 'abc', [VERIFIER_COOKIE]: 'v' }
+    )
+    const driver = new SpyDriver(ctx, SECRET_CONFIG)
+    driver.setPostBody({ access_token: 't', id_token: 'not-a-jwt' })
+    driver.setGetBody({ id: 'oid-1' })
+    const fromCallback = await driver.user()
+    const fromToken = await driver.userFromToken('t')
+    assert.isNull(fromCallback.tenantId)
+    assert.isNull(fromToken.tenantId)
   })
 })

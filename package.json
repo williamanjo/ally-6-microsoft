@@ -21,7 +21,7 @@
     "build": "tsc"
   },
   "devDependencies": {
-    "@adonisjs/ally": "^6.0.0",
+    "@adonisjs/ally": "^6.3.2",
     "@adonisjs/core": "^7.0.1",
     "@adonisjs/eslint-config": "^3.0.0",
     "@adonisjs/prettier-config": "^1.4.5",
@@ -33,7 +33,7 @@
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
-    "@adonisjs/ally": "^6.0.0",
+    "@adonisjs/ally": "^6.3.2",
     "@adonisjs/core": "^7.0.1"
   },
   "author": "williamanjo",
