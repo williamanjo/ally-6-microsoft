@@ -724,6 +724,56 @@ test.group('2.0 hardening', () => {
     }
   })
 
+  test('refreshAccessToken surfaces a credential-free error on an HTTP failure', async ({
+    assert,
+  }) => {
+    class FailDriver extends MicrosoftDriver {
+      protected override httpClient(_url: string): any {
+        const req: any = {
+          header: () => req,
+          field: () => req,
+          parseAs: () => req,
+          post: async () => {
+            throw Object.assign(new Error('Request failed with status 400'), {
+              response: { status: 400 },
+              options: { body: 'client_secret=supersecret&refresh_token=rt-value' },
+            })
+          },
+        }
+        return req
+      }
+      run(token: string) {
+        return this.refreshAccessToken(token)
+      }
+    }
+    const driver = new FailDriver(createCtx(), SECRET_CONFIG)
+    await assert.rejects(
+      () => driver.run('rt-value'),
+      /token request to Microsoft failed \(HTTP 400\)/
+    )
+    try {
+      await driver.run('rt-value')
+    } catch (e: any) {
+      assert.isUndefined(e.response)
+      assert.isUndefined(e.options)
+      assert.notInclude(JSON.stringify({ msg: e.message, own: { ...e } }), 'supersecret')
+    }
+  })
+
+  test('sanitizeTokenError leaves non-HTTP errors untouched', ({ assert }) => {
+    class ExposeDriver extends MicrosoftDriver {
+      expose(error: unknown) {
+        return this.sanitizeTokenError(error)
+      }
+    }
+    const driver = new ExposeDriver(createCtx(), SECRET_CONFIG)
+    const validationError = new Error('E_OAUTH_STATE_MISMATCH')
+    assert.equal(driver.expose(validationError), validationError)
+    const httpError = driver.expose({ response: { status: 401 } })
+    assert.instanceOf(httpError, Error)
+    assert.match((httpError as Error).message, /HTTP 401/)
+  })
+
   test('user() marks the email verified from the xms_edov claim', async ({ assert }) => {
     const driver = new SpyDriver(boundCtx(), SECRET_CONFIG)
     driver.setPostBody({

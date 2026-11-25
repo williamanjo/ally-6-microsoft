@@ -194,6 +194,8 @@ export default class AuthController {
 
 `redirect()` sets an encrypted state cookie and a PKCE code verifier cookie; `user()` and `accessToken()` reject the callback unless both are present and match. `redirectUrl()` on its own sets no state cookie, so its callback is rejected: use `redirect()`. `stateless()` turns the state check off; use it only with your own CSRF protection.
 
+A token request that fails at the HTTP layer is re-thrown as a credential-free error (`"the token request to Microsoft failed (HTTP <status>)"`), so the client secret, certificate assertion and refresh token in the request body never reach your logs through the error object. Note that `NODE_DEBUG=oauth_client` still prints them — never enable it in production.
+
 ## Routes
 
 ```ts

@@ -196,7 +196,13 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     // The token endpoint answers JSON; without this the HTTP client defaults to text and every
     // field below reads as undefined, so a failed refresh would be reported as a success.
     request.parseAs('json')
-    const body = await request.post()
+    let body: Record<string, unknown>
+    try {
+      body = await request.post()
+    } catch (error) {
+      // Drop the request body (refresh_token, client credential) from the surfaced error
+      throw this.sanitizeTokenError(error)
+    }
 
     const accessToken = body.access_token as string | undefined
     if (!accessToken) {
@@ -233,6 +239,34 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
       return false
     }
     return !this.stateCookieValue || super.stateMisMatch()
+  }
+
+  /**
+   * Exchanges the authorization code for a token, replacing any HTTP-layer error with one
+   * that does not carry the request body. The underlying ky error keeps the POST options
+   * (client_secret, client_assertion, refresh_token) on the thrown object, so a consumer
+   * that serializes the whole error would leak the credential.
+   */
+  async accessToken(callback?: (request: ApiRequestContract) => void) {
+    try {
+      return await super.accessToken(callback)
+    } catch (error) {
+      throw this.sanitizeTokenError(error)
+    }
+  }
+
+  /**
+   * Returns a credential-free error for HTTP-layer token failures, and leaves every other
+   * error (state mismatch, missing code, a missing-token error) untouched.
+   */
+  protected sanitizeTokenError(error: unknown): unknown {
+    const isHttp =
+      !!error && typeof error === 'object' && ('response' in error || 'request' in error)
+    if (!isHttp) return error
+    const status = (error as { response?: { status?: number } }).response?.status
+    return new Error(
+      `MicrosoftDriver: the token request to Microsoft failed${status ? ` (HTTP ${status})` : ''}.`
+    )
   }
 
   /**
