@@ -38,7 +38,8 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
 
   public config: MicrosoftDriverConfigResolved
 
-  // Certificate material, validated and parsed once at construction (not on every token request)
+  // Certificate material, validated and parsed when the driver is built. Ally builds one
+  // driver per request, so this runs per request (a small, constant cost), not once at boot.
   #privateKey?: KeyObject
   #x5t?: string
 
@@ -86,11 +87,19 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   }
 
   /**
-   * Validates the thumbprint and loads the private key once, at construction, so a bad
-   * certificate fails fast at boot instead of on the first token request, and the key file
-   * is read a single time rather than on every exchange and refresh.
+   * Validates the thumbprint and loads the private key when the driver is built, so a bad
+   * certificate fails on the first Microsoft request (redirect included) instead of at the
+   * token exchange, and the key is read once per request rather than on every signature.
    */
   protected prepareCertificate(certificate: CertificateConfig) {
+    // `privateKey` is a file path. If key contents were pasted instead, say so without
+    // echoing them: the value (and an fs error built from it) would land in logs.
+    if (/-----BEGIN|\n/.test(certificate.privateKey)) {
+      throw new Error(
+        'MicrosoftDriver: "certificate.privateKey" must be the path to the key file, not the key contents.'
+      )
+    }
+
     const hex = certificate.thumbprint.replace(/:/g, '')
     if (!/^[0-9a-fA-F]{40}$/.test(hex)) {
       throw new Error(
@@ -256,16 +265,18 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   }
 
   /**
-   * Returns a credential-free error for HTTP-layer token failures, and leaves every other
-   * error (state mismatch, missing code, a missing-token error) untouched.
+   * Returns a credential-free error for HTTP-layer failures, and leaves every other error
+   * (state mismatch, missing code, a missing-token error) untouched. ky errors keep the
+   * request options and Request on the thrown object: the token POST body (client secret,
+   * assertion, refresh token) and the Graph `Authorization: Bearer` header.
    */
-  protected sanitizeTokenError(error: unknown): unknown {
+  protected sanitizeTokenError(error: unknown, what = 'token request'): unknown {
     const isHttp =
       !!error && typeof error === 'object' && ('response' in error || 'request' in error)
     if (!isHttp) return error
     const status = (error as { response?: { status?: number } }).response?.status
     return new Error(
-      `MicrosoftDriver: the token request to Microsoft failed${status ? ` (HTTP ${status})` : ''}.`
+      `MicrosoftDriver: the ${what} to Microsoft failed${status ? ` (HTTP ${status})` : ''}.`
     )
   }
 
@@ -398,7 +409,13 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
       callback(request)
     }
 
-    const body = await request.get()
+    let body: Record<string, unknown>
+    try {
+      body = await request.get()
+    } catch (error) {
+      // A ky error here carries the `Authorization: Bearer <access token>` header
+      throw this.sanitizeTokenError(error, 'Graph user request')
+    }
 
     const avatarUrl =
       this.config.fetchPhoto === true ? await this.getUserPhotoAsBase64(accessToken) : null

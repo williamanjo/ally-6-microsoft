@@ -147,7 +147,7 @@ const allyConfig = defineConfig({
 export default allyConfig
 ```
 
-> `clientSecret` is **required** unless `certificate` is provided. Passing neither throws at startup.
+> `clientSecret` is **required** unless `certificate` is provided. Passing neither, or a bad certificate (invalid thumbprint, unreadable or invalid key file), throws when the driver is built — on the first `ally.use('microsoft')` call, since Ally builds one driver per request. `certificate.privateKey` must be a **file path**; pasting the key contents is rejected without echoing them.
 
 ---
 
@@ -194,7 +194,7 @@ export default class AuthController {
 
 `redirect()` sets an encrypted state cookie and a PKCE code verifier cookie; `user()` and `accessToken()` reject the callback unless both are present and match. `redirectUrl()` on its own sets no state cookie, so its callback is rejected: use `redirect()`. `stateless()` turns the state check off; use it only with your own CSRF protection.
 
-A token request that fails at the HTTP layer is re-thrown as a credential-free error (`"the token request to Microsoft failed (HTTP <status>)"`), so the client secret, certificate assertion and refresh token in the request body never reach your logs through the error object. Note that `NODE_DEBUG=oauth_client` still prints them — never enable it in production.
+Every request the driver sends that fails at the HTTP layer — the token exchange, the refresh, and the Graph `/me` call — is re-thrown as a credential-free error (`"the token request to Microsoft failed (HTTP <status>)"` or `"the Graph user request to Microsoft failed (HTTP <status>)"`), so the client secret, certificate assertion, refresh token and the user's Bearer access token never reach your logs through the error object. The photo fetch swallows its errors and returns `null`. Note that `NODE_DEBUG=oauth_client` still prints them — never enable it in production.
 
 ## Routes
 

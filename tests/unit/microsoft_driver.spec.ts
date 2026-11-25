@@ -3,6 +3,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto'
 import { unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { inspect } from 'node:util'
 import { MicrosoftDriver } from '../../src/microsoft.js'
 import type { MicrosoftDriverConfig } from '../../src/types/main.js'
 import type { HttpContext } from '@adonisjs/core/http'
@@ -828,5 +829,52 @@ test.group('2.0 hardening', () => {
     driver.setGetBody({ id: 'oid', mail: 'person@contoso.com' })
     const user = await driver.user()
     assert.equal(user.emailVerificationState, 'unsupported')
+  })
+})
+
+test.group('run-2 audit fixes', () => {
+  test('a Graph /me HTTP failure surfaces without the Bearer token', async ({ assert }) => {
+    class GraphFailDriver extends MicrosoftDriver {
+      protected override httpClient(_url: string): any {
+        const req: any = {
+          header: () => req,
+          parseAs: () => req,
+          get: async () => {
+            throw Object.assign(new Error('Request failed with status code 401'), {
+              response: { status: 401 },
+              options: { headers: { Authorization: 'Bearer DUMMY-TOKEN-123' } },
+              request: { headers: { Authorization: 'Bearer DUMMY-TOKEN-123' } },
+            })
+          },
+        }
+        return req
+      }
+    }
+    const driver = new GraphFailDriver(createCtx(), SECRET_CONFIG)
+    let caught: any
+    try {
+      await driver.userFromToken('DUMMY-TOKEN-123')
+    } catch (error) {
+      caught = error
+    }
+    assert.match(caught.message, /Graph user request to Microsoft failed \(HTTP 401\)/)
+    assert.isUndefined(caught.options)
+    assert.isUndefined(caught.request)
+    assert.notInclude(inspect(caught, { depth: 5 }), 'DUMMY-TOKEN-123')
+  })
+
+  test('inline key contents are rejected without echoing them', ({ assert }) => {
+    const pem = '-----BEGIN PRIVATE KEY-----\nSECRET-KEY-MATERIAL\n-----END PRIVATE KEY-----'
+    let caught: any
+    try {
+      new MicrosoftDriver(createCtx(), {
+        ...BASE_CONFIG,
+        certificate: { privateKey: pem, thumbprint: TEST_THUMBPRINT },
+      })
+    } catch (error) {
+      caught = error
+    }
+    assert.match(caught.message, /must be the path to the key file/)
+    assert.notInclude(inspect(caught, { depth: 5 }), 'SECRET-KEY-MATERIAL')
   })
 })
