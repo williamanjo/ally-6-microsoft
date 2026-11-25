@@ -241,10 +241,12 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
     const accessToken = await this.accessToken(callback)
     const user = await this.getUserInfo(accessToken.token, callback)
     const claims = this.idTokenClaims((accessToken as Record<string, unknown>).id_token)
+    const verified = this.verifiedEmail(claims, user.email)
     return {
       ...user,
       tenantId: typeof claims?.tid === 'string' ? (claims.tid as string) : null,
-      emailVerificationState: this.emailVerificationFromClaims(claims),
+      email: verified.email,
+      emailVerificationState: verified.state,
       token: accessToken,
     }
   }
@@ -266,16 +268,30 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
   }
 
   /**
-   * Maps the `xms_edov` ("email domain owner verified") id_token claim to Ally's
-   * email verification state. Requires the optional claim to be enabled on the app
-   * registration; when it is absent the state stays `unsupported`.
+   * Decides the email to return and its verification state.
+   *
+   * `xms_edov` ("email domain owner verified") attests the domain of the id_token's own
+   * `email` claim, NOT the Graph `mail` attribute. Reporting `verified` for a different
+   * address than the one that was vouched for would re-open the nOAuth / claim-mismatch
+   * hole, so `verified` is returned only together with that claim's email. A tenant admin
+   * can still set Graph `mail` freely, so without a positive `xms_edov` the Graph-derived
+   * email is handed back as `unsupported` (or `unverified` when the claim says so).
+   *
+   * Requires the optional `email` and `xms_edov` claims on the app registration; without
+   * them the state stays `unsupported`.
    */
-  protected emailVerificationFromClaims(
-    claims: Record<string, unknown> | null
-  ): 'verified' | 'unverified' | 'unsupported' {
-    if (claims?.xms_edov === true) return 'verified'
-    if (claims?.xms_edov === false) return 'unverified'
-    return 'unsupported'
+  protected verifiedEmail(
+    claims: Record<string, unknown> | null,
+    graphEmail: string
+  ): { email: string; state: 'verified' | 'unverified' | 'unsupported' } {
+    const claimEmail = typeof claims?.email === 'string' ? (claims.email as string) : null
+    if (claims?.xms_edov === true && claimEmail) {
+      return { email: claimEmail, state: 'verified' }
+    }
+    if (claims?.xms_edov === false) {
+      return { email: graphEmail, state: 'unverified' }
+    }
+    return { email: graphEmail, state: 'unsupported' }
   }
 
   /**

@@ -711,11 +711,41 @@ test.group('2.0 hardening', () => {
 
   test('user() marks the email verified from the xms_edov claim', async ({ assert }) => {
     const driver = new SpyDriver(boundCtx(), SECRET_CONFIG)
-    driver.setPostBody({ access_token: 't', id_token: fakeIdToken({ tid: 't1', xms_edov: true }) })
+    driver.setPostBody({
+      access_token: 't',
+      id_token: fakeIdToken({ tid: 't1', xms_edov: true, email: 'person@contoso.com' }),
+    })
     driver.setGetBody({ id: 'oid', mail: 'person@contoso.com' })
     const user = await driver.user()
     assert.equal(user.emailVerificationState, 'verified')
+    assert.equal(user.email, 'person@contoso.com')
     assert.equal(user.tenantId, 't1')
+  })
+
+  test('user() returns the verified id_token email, not the Graph mail, when they differ', async ({
+    assert,
+  }) => {
+    const driver = new SpyDriver(boundCtx(), SECRET_CONFIG)
+    driver.setPostBody({
+      access_token: 't',
+      id_token: fakeIdToken({ tid: 't1', xms_edov: true, email: 'real@contoso.com' }),
+    })
+    // A tenant admin set Graph mail to a victim's address; the verified claim must win
+    driver.setGetBody({ id: 'oid', mail: 'victim@other.com' })
+    const user = await driver.user()
+    assert.equal(user.emailVerificationState, 'verified')
+    assert.equal(user.email, 'real@contoso.com')
+  })
+
+  test('user() stays unsupported when xms_edov is true but no email claim is present', async ({
+    assert,
+  }) => {
+    const driver = new SpyDriver(boundCtx(), SECRET_CONFIG)
+    driver.setPostBody({ access_token: 't', id_token: fakeIdToken({ tid: 't1', xms_edov: true }) })
+    driver.setGetBody({ id: 'oid', mail: 'person@contoso.com' })
+    const user = await driver.user()
+    assert.equal(user.emailVerificationState, 'unsupported')
+    assert.equal(user.email, 'person@contoso.com')
   })
 
   test('user() marks the email unverified when xms_edov is false', async ({ assert }) => {
@@ -724,6 +754,7 @@ test.group('2.0 hardening', () => {
     driver.setGetBody({ id: 'oid', mail: 'person@contoso.com' })
     const user = await driver.user()
     assert.equal(user.emailVerificationState, 'unverified')
+    assert.equal(user.email, 'person@contoso.com')
   })
 
   test('user() keeps emailVerificationState unsupported without the claim', async ({ assert }) => {
