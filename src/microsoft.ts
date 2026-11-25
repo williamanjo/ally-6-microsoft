@@ -16,8 +16,9 @@ const ALLOWED_PHOTO_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'im
 
 // The photo becomes a base64 data URI that usually lands in the session. Cap it so a large
 // response cannot bloat the session, and give the fetch a deadline so it cannot hang a login.
-const MAX_PHOTO_BYTES = 2_000_000
-const PHOTO_TIMEOUT_MS = 5_000
+// Both are overridable per driver via `maxPhotoBytes` / `photoTimeoutMs` in the config.
+const DEFAULT_MAX_PHOTO_BYTES = 2_000_000
+const DEFAULT_PHOTO_TIMEOUT_MS = 5_000
 
 export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScopes> {
   protected authorizeUrl: string
@@ -313,8 +314,10 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
    * Returns null if the user has no photo or if the request fails.
    */
   protected async getUserPhotoAsBase64(accessToken: string): Promise<string | null> {
+    const maxBytes = this.config.maxPhotoBytes ?? DEFAULT_MAX_PHOTO_BYTES
+    const timeoutMs = this.config.photoTimeoutMs ?? DEFAULT_PHOTO_TIMEOUT_MS
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), PHOTO_TIMEOUT_MS)
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const response = await fetch(this.userPhotoUrl, {
         headers: {
@@ -333,10 +336,10 @@ export class MicrosoftDriver extends Oauth2Driver<MicrosoftToken, MicrosoftScope
 
       // Early out on a declared size before downloading the body
       const declared = Number(response.headers.get('content-length'))
-      if (Number.isFinite(declared) && declared > MAX_PHOTO_BYTES) return null
+      if (Number.isFinite(declared) && declared > maxBytes) return null
 
       const buffer = await response.arrayBuffer()
-      if (buffer.byteLength > MAX_PHOTO_BYTES) return null
+      if (buffer.byteLength > maxBytes) return null
       const base64 = Buffer.from(buffer).toString('base64')
 
       return `data:${contentType};base64,${base64}`

@@ -694,6 +694,21 @@ test.group('2.0 hardening', () => {
     }
   })
 
+  test('getUserPhotoAsBase64 honors a custom maxPhotoBytes', async ({ assert }) => {
+    const driver = new TestDriver(createCtx(), { ...SECRET_CONFIG, maxPhotoBytes: 8 })
+    globalThis.fetch = async () =>
+      ({
+        ok: true,
+        headers: { get: () => 'image/jpeg' },
+        arrayBuffer: async () => new ArrayBuffer(9),
+      }) as any
+    try {
+      assert.isNull(await driver.testGetUserPhoto('fake-token'))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   test('getUserPhotoAsBase64 passes an abort signal', async ({ assert }) => {
     const driver = new TestDriver(createCtx(), SECRET_CONFIG)
     let hadSignal = false

@@ -241,6 +241,19 @@ Supported sizes (Microsoft Graph): `48x48`, `64x64`, `96x96`, `120x120`, `240x24
 
 The content-type returned by Microsoft Graph is validated against an allowlist (`image/jpeg`, `image/png`, `image/gif`, `image/webp`) before the data URI is constructed. Any unexpected content-type returns `null`.
 
+#### Size cap and timeout
+
+The photo fetch is bounded so a large or slow response cannot bloat the session or hang the login. A response over the cap, or slower than the timeout, makes `avatarUrl` `null`. Both default values can be overridden:
+
+```ts
+microsoft({
+  // ...
+  fetchPhoto: true,
+  maxPhotoBytes: 2_000_000, // default; a bigger body is dropped
+  photoTimeoutMs: 5_000, // default; a slower fetch is aborted
+})
+```
+
 ### Refresh token
 
 To receive a refresh token, include `offline_access` in your scopes. Then call `refreshAccessToken()` with the stored refresh token:
