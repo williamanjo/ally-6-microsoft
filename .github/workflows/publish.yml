@@ -1,34 +1,53 @@
 name: Publish
-# Stages the version on npm when a version tag is pushed: git tag v1.7.0 && git push origin v1.7.0
-# Auth: npm Trusted Publisher (OIDC) for this repository and publish.yml, no token stored. The trusted publisher only
-# allows npm stage publish: the version waits staged until a maintainer approves it with 2FA (npm stage list /
-# npm stage approve <id>, or on npmjs.com).
+# Stages the version on npm when a version tag is pushed: git tag v2.0.0 && git push origin v2.0.0
+#
+# Release authority is enforced by GitHub and npm, not by this file: whoever pushes a tag controls the copy of this
+# file that runs, so any check below can be removed in the tagged commit. What actually gates a release:
+#   - the publish job runs in the "npm-release" environment, which must require a reviewer before it starts;
+#   - the npm Trusted Publisher (OIDC, no token stored) must be bound to that environment, so a run that drops
+#     `environment:` cannot publish;
+#   - the Trusted Publisher only allows `npm stage publish`; a maintainer approves the staged version with 2FA
+#     (npm stage list / npm stage approve <id>, or on npmjs.com).
 on:
   push:
     tags: ['v*.*.*']
 permissions:
   contents: read
-  # OIDC for the npm Trusted Publisher (and provenance, which links the package to this workflow run)
-  id-token: write
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm-release
+    permissions:
+      contents: read
+      # OIDC for the npm Trusted Publisher (and provenance, which links the package to this workflow run)
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # actions pinned to a commit SHA (the tag is the version it points to)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # full history, so the main-ancestry check below can see origin/main
+          fetch-depth: 0
+          persist-credentials: false
+      # no npm cache in the release job: install from the registry only, never from a restored cache
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          cache: npm
           registry-url: https://registry.npmjs.org
-      - name: Tag matches package.json version
+      # Catches a mistaken tag (wrong version, or a commit that never reached main); see the header for what
+      # stops a deliberate one.
+      - name: Tag matches package.json version and is on main
         run: |
           versao="v$(node -p "require('./package.json').version")"
           if [ "$versao" != "$GITHUB_REF_NAME" ]; then
             echo "tag $GITHUB_REF_NAME does not match package.json ($versao)"
             exit 1
           fi
-      # npm stage needs a recent npm CLI
-      - run: npm install -g npm@12
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "tag $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main"
+            exit 1
+          fi
+      # npm stage needs a recent npm CLI; pinned to an exact version
+      - run: npm install -g npm@12.2.3
       - run: npm ci
       - run: npm run typecheck
       - run: npm test

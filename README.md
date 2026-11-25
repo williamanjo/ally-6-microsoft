@@ -343,12 +343,22 @@ MIT
 Bump the version (`npm version minor --no-git-tag-version`), commit it to `main`, then push a matching tag:
 
 ```bash
-git tag v1.7.0 && git push origin v1.7.0
+git tag v2.0.0 && git push origin v2.0.0
 ```
 
-The **Publish** workflow checks that the tag matches `package.json`, runs typecheck, tests and build, and **stages** the version on npm with provenance (`npm stage publish`). It authenticates as an npm **Trusted Publisher** (OIDC, no token stored) allowed only to stage, so nothing goes live until a maintainer approves it with 2FA:
+The **Publish** workflow runs in the `npm-release` GitHub environment, so it waits for a reviewer to approve the run before it starts. Then it checks that the tag matches `package.json` and points at a commit on `main`, runs typecheck, tests and build, and **stages** the version on npm with provenance (`npm stage publish`). It authenticates as an npm **Trusted Publisher** (OIDC, no token stored) allowed only to stage, so nothing goes live until a maintainer approves it with 2FA:
 
 ```bash
 npm stage list @williamanjo/ally-6-microsoft
 npm stage approve <stage-id>
 ```
+
+Before approving, check that the staged entry's provenance points at the tagged commit and that only one stage exists for the version.
+
+### One-time setup (outside the repository)
+
+The checks in `publish.yml` only catch mistakes: whoever pushes a tag controls the copy of the workflow that runs. These settings are what gate a release:
+
+1. **GitHub environment** — Settings → Environments → `npm-release` → *Required reviewers*: add the maintainers. Optionally limit *Deployment branches and tags* to `v*.*.*` tags.
+2. **npm Trusted Publisher** — on npmjs.com, package Settings → Trusted Publisher: repository `williamanjo/ally-6-microsoft`, workflow `publish.yml`, environment `npm-release`, staged publishing only. With the environment set, a run that drops `environment:` from the workflow cannot publish.
+3. **Tag ruleset** — Settings → Rules → Rulesets: restrict creating and updating `v*` tags to maintainers.
